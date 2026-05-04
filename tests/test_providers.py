@@ -65,6 +65,23 @@ async def test_wttr_url_encodes_city_with_spaces_and_diacritics(transformed):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_provider_returns_fallback_on_read_timeout(query, transformed):
+    """P4.2: an httpx.ReadTimeout from upstream is converted to a
+    fallback ProviderResult so the rest of the response is unaffected."""
+    respx.get("https://goweather.xyz/weather/New%20York").mock(
+        side_effect=httpx.ReadTimeout("upstream took too long")
+    )
+    async with httpx.AsyncClient() as client:
+        result = await WttrProvider().safe_fetch(client, query, transformed)
+    assert result.status == "error"
+    assert "ReadTimeout" in result.error
+    assert result.normalized is not None
+    assert result.normalized.source_quality == "fallback"
+    assert result.normalized.notes and "unavailable" in result.normalized.notes
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_provider_records_error_on_5xx(query, transformed):
     respx.get("https://goweather.xyz/weather/New%20York").mock(return_value=httpx.Response(500))
     async with httpx.AsyncClient() as client:
