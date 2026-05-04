@@ -1,9 +1,10 @@
 import math
+from typing import Any, Optional
 
 import httpx
 
 from app.config import settings
-from app.models import TransformedInputs, WeatherQuery
+from app.models import TransformedInputs, WeatherQuery, WeatherSnapshot
 from app.providers.base import WeatherProvider
 
 
@@ -68,8 +69,45 @@ class OceanDriversProvider(WeatherProvider):
             "meteo": meteo_resp.json(),
         }
 
+    def normalize(self, raw: Any, transformed: TransformedInputs) -> WeatherSnapshot:
+        raw = raw or {}
+        meteo = raw.get("meteo")
+        if not isinstance(meteo, dict):
+            # No usable station — surface as a "no data" snapshot, but live (not fallback).
+            return WeatherSnapshot(
+                is_forecast=False,
+                forecast_for_date=transformed.date,
+                source_quality="live",
+                notes=raw.get("message") or "No marine station data available.",
+            )
+
+        # OceanDrivers schemas vary by station. Probe likely keys defensively.
+        temp = _first_number(meteo, "temperatureC", "temperature_c", "temperature", "tempC", "temp")
+        humid = _first_number(meteo, "humidity", "relativeHumidity", "humidityPct", "rh")
+        wind = _first_number(meteo, "windSpeedKph", "windSpeed", "windSpeed_kph", "wind")
+        return WeatherSnapshot(
+            temperature_c=temp,
+            humidity_pct=humid,
+            wind_kph=wind,
+            is_forecast=False,
+            forecast_for_date=transformed.date,
+            source_quality="live",
+            notes=f"Station {raw.get('station')} at {raw.get('distance_km')}km",
+        )
+
+    def fallback(self, transformed: TransformedInputs) -> WeatherSnapshot:
+        return WeatherSnapshot(
+            temperature_c=17.0,
+            wind_kph=15.0,
+            humidity_pct=70.0,
+            is_forecast=False,
+            forecast_for_date=transformed.date,
+            source_quality="fallback",
+            notes="OceanDrivers unavailable; placeholder example data.",
+        )
+
     @staticmethod
-    def _find_nearest(stations: list[dict], lat: float, lon: float):
+    def _find_nearest(stations: list, lat: float, lon: float):
         best, best_d = None, float("inf")
         for s in stations:
             raw_lat = _first_non_none(s.get("latitude"), s.get("lat"))
@@ -92,4 +130,14 @@ def _first_non_none(*values):
     for v in values:
         if v is not None:
             return v
+    return None
+
+
+def _first_number(d: dict, *keys: str) -> Optional[float]:
+    for k in keys:
+        if k in d:
+            try:
+                return float(d[k])
+            except (TypeError, ValueError):
+                continue
     return None
