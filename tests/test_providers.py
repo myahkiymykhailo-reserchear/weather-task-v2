@@ -145,6 +145,35 @@ async def test_oceandrivers_returns_message_when_no_nearby_station(query, transf
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_oceandrivers_handles_zero_coordinate_station():
+    """Regression: 0.0 latitude/longitude must not be treated as missing."""
+    from datetime import date
+
+    from app.models import TransformedInputs, WeatherQuery
+
+    near_equator = TransformedInputs(
+        lat=0.5, lon=0.5, timezone="UTC", resolved_name="Test", country_code="XX",
+        date=date(2026, 5, 4), units="celsius",
+    )
+    q = WeatherQuery(city="Test", country="XX", units="celsius")
+
+    respx.get("https://api.oceandrivers.com/v1.0/getStations/").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"stationName": "EquatorStation", "latitude": 0.0, "longitude": 0.0}],
+        )
+    )
+    respx.get("https://api.oceandrivers.com/v1.0/getMeteo/EquatorStation/en/json").mock(
+        return_value=httpx.Response(200, json={"temperatureC": 28.0})
+    )
+    async with httpx.AsyncClient() as client:
+        result = await OceanDriversProvider().safe_fetch(client, q, near_equator)
+    assert result.status == "ok"
+    assert result.data["station"] == "EquatorStation"
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_oceandrivers_fetches_meteo_when_station_close(query, transformed):
     respx.get("https://api.oceandrivers.com/v1.0/getStations/").mock(
         return_value=httpx.Response(

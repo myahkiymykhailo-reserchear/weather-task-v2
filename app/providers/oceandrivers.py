@@ -49,7 +49,9 @@ class OceanDriversProvider(WeatherProvider):
                 "nearest_distance_km": round(distance_km, 2),
             }
 
-        station_id = nearest.get("stationName") or nearest.get("name") or nearest.get("id")
+        station_id = _first_non_none(
+            nearest.get("stationName"), nearest.get("name"), nearest.get("id")
+        )
         if not station_id:
             return {
                 "message": "Nearest station has no identifier",
@@ -70,9 +72,13 @@ class OceanDriversProvider(WeatherProvider):
     def _find_nearest(stations: list[dict], lat: float, lon: float):
         best, best_d = None, float("inf")
         for s in stations:
+            raw_lat = _first_non_none(s.get("latitude"), s.get("lat"))
+            raw_lon = _first_non_none(s.get("longitude"), s.get("lon"))
+            if raw_lat is None or raw_lon is None:
+                continue
             try:
-                slat = float(s.get("latitude") or s.get("lat"))
-                slon = float(s.get("longitude") or s.get("lon"))
+                slat = float(raw_lat)
+                slon = float(raw_lon)
             except (TypeError, ValueError):
                 continue
             d = haversine(lat, lon, slat, slon)
@@ -80,3 +86,10 @@ class OceanDriversProvider(WeatherProvider):
                 best_d = d
                 best = s
         return best, best_d
+
+
+def _first_non_none(*values):
+    for v in values:
+        if v is not None:
+            return v
+    return None
