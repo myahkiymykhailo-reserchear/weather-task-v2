@@ -35,7 +35,27 @@ class Settings(BaseSettings):
     oceandrivers_max_station_km: float = 200.0
 
     log_level: str = "INFO"
-    cors_allow_origins: str = ""  # comma-separated list, empty = no CORS
+
+    # CORS configuration.
+    #
+    # `cors_allow_origins` is a comma-separated explicit list (e.g. for
+    # production lock-down to one specific UI origin).
+    #
+    # `cors_allow_origin_regex` is a regex matched against the request's
+    # Origin header. The default below is permissive on purpose so the
+    # service "just works" in the two common dev setups:
+    #   1. UI served by FastAPI itself  -> same-origin, no CORS needed
+    #   2. UI on http://localhost:* or https://*.github.io with the API
+    #      running on http://127.0.0.1:* -> CORS needed; allowed by default
+    #
+    # For a production deployment, set WEATHER_CORS_ALLOW_ORIGINS to your
+    # exact UI origin and WEATHER_CORS_ALLOW_ORIGIN_REGEX="" to disable
+    # the dev default.
+    cors_allow_origins: str = ""
+    cors_allow_origin_regex: str = (
+        r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$"
+        r"|^https://[\w-]+\.github\.io$"
+    )
 
 
 settings = Settings()

@@ -124,7 +124,8 @@ Every setting is overridable. All env vars use the `WEATHER_` prefix:
 | `WEATHER_REQUEST_TIMEOUT_SECONDS`         | `8.0`                                                | Per-call HTTP timeout to each upstream.            |
 | `WEATHER_TOTAL_REQUEST_BUDGET_SECONDS`    | `12.0`                                               | Hard cap per provider; on overrun, returns fallback. |
 | `WEATHER_LOG_LEVEL`                       | `INFO`                                               | `DEBUG` to see every upstream call.                |
-| `WEATHER_CORS_ALLOW_ORIGINS`              | `""`                                                 | Comma-separated origins; empty disables CORS.      |
+| `WEATHER_CORS_ALLOW_ORIGINS`              | `""`                                                 | Comma-separated explicit origin allow-list. Use for production lock-down. |
+| `WEATHER_CORS_ALLOW_ORIGIN_REGEX`         | localhost + `*.github.io` (see below)                | Regex matched against `Origin`. Default permits dev origins; set to `""` to disable. |
 | `WEATHER_GEOCODING_URL`                   | Open-Meteo geocoding                                 | Swap geocoder.                                     |
 | `WEATHER_OPEN_METEO_FORECAST_URL`         | Open-Meteo forecast                                  |                                                    |
 | `WEATHER_WTTR_URL`                        | `https://goweather.xyz/weather`                      |                                                    |
@@ -347,16 +348,21 @@ The `app/static/` UI is published to GitHub Pages on every push to `main` by [`.
 
 The Pages site only contains the UI — there is no FastAPI backend on `github.io`. Two options:
 
-1. **Run the API locally** (simplest, good for personal use). Open the Pages URL, type `http://127.0.0.1:8000` into the *API server* field, and run:
+1. **Run the API locally** (simplest, good for personal use). Just run:
 
    ```bash
-   WEATHER_CORS_ALLOW_ORIGINS="https://USER.github.io" \
-     uvicorn app.main:app
+   uvicorn app.main:app
    ```
 
-   The `WEATHER_CORS_ALLOW_ORIGINS` value must match the Pages origin exactly (https + hostname, no trailing slash).
+   The default CORS configuration already accepts `localhost` and `*.github.io` origins, so the Pages UI can call the local API with no extra setup. Open the Pages URL — the *API server* field is pre-filled with `http://127.0.0.1:8000` automatically when on `*.github.io`.
 
-2. **Host the API somewhere reachable** (Fly.io, Cloud Run, Render, …) and set the *API server* field on the Pages UI to that URL. The same `WEATHER_CORS_ALLOW_ORIGINS` env var applies.
+2. **Host the API somewhere reachable** (Fly.io, Cloud Run, Render, …) and set the *API server* field on the Pages UI to that URL. For production, lock down CORS to your specific UI origin:
+
+   ```bash
+   WEATHER_CORS_ALLOW_ORIGINS="https://your-ui.example.com" \
+     WEATHER_CORS_ALLOW_ORIGIN_REGEX="" \
+     uvicorn app.main:app
+   ```
 
 The *API server* field value persists in `localStorage`, and you can also pre-fill it via `?api=https://my-api.example.com` in the page URL.
 

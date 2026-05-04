@@ -183,6 +183,41 @@ def test_root_serves_html_ui(client):
     assert "static/app.js" in body
 
 
+def test_cors_default_allows_github_pages_origin(client):
+    """Default cors_allow_origin_regex must let *.github.io call /weather."""
+    resp = client.get(
+        "/weather",
+        params={"city": "Berlin", "country": "DE"},
+        headers={"Origin": "https://myahkiymykhailo-reserchear.github.io"},
+    )
+    # respx isn't mocked here so the upstream calls would fail, but FastAPI
+    # still emits the CORS header on every response — that's all we check.
+    allow_origin = resp.headers.get("access-control-allow-origin")
+    assert allow_origin == "https://myahkiymykhailo-reserchear.github.io"
+
+
+def test_cors_default_allows_localhost_origin(client):
+    resp = client.get(
+        "/livez",
+        headers={"Origin": "http://localhost:8765"},
+    )
+    assert resp.headers.get("access-control-allow-origin") == "http://localhost:8765"
+
+
+def test_cors_preflight_returns_allow_methods(client):
+    """Browsers send an OPTIONS preflight before a cross-origin GET."""
+    resp = client.options(
+        "/weather",
+        headers={
+            "Origin": "https://x.github.io",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert resp.status_code == 200
+    assert "GET" in resp.headers.get("access-control-allow-methods", "")
+    assert resp.headers.get("access-control-allow-origin") == "https://x.github.io"
+
+
 def test_static_assets_are_served(client):
     """Both CSS and JS load with the right content types."""
     css = client.get("/static/style.css")
