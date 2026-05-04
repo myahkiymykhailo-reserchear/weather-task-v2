@@ -8,7 +8,9 @@ from app.main import app
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    # `with` triggers FastAPI lifespan (startup/shutdown) so app.state.http_client exists.
+    with TestClient(app) as c:
+        yield c
 
 
 @respx.mock
