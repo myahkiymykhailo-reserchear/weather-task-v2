@@ -1,10 +1,11 @@
 from datetime import date as date_type
-from typing import Any, Literal, Optional
+from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field
 
 
 Units = Literal["celsius", "fahrenheit"]
+SourceQuality = Literal["live", "fallback"]
 
 
 class WeatherQuery(BaseModel):
@@ -25,14 +26,46 @@ class TransformedInputs(BaseModel):
     units: Units
 
 
+class WeatherSnapshot(BaseModel):
+    """Canonical, provider-agnostic weather snapshot for one location/date.
+
+    Always stored in canonical units (Celsius, km/h, mm) regardless of the
+    output units the user requested. Aggregator does display-time conversion.
+
+    `source_quality="fallback"` means this snapshot is example data the
+    provider returned because the upstream API was unreachable or returned
+    a non-2xx status. Keep that flag visible in any consumer UI.
+    """
+
+    temperature_c: Optional[float] = None
+    feels_like_c: Optional[float] = None
+    humidity_pct: Optional[float] = None
+    wind_kph: Optional[float] = None
+    wind_direction_deg: Optional[float] = None
+    precipitation_mm: Optional[float] = None
+    cloud_cover_pct: Optional[float] = None
+    conditions: Optional[str] = None
+    is_forecast: bool = False
+    forecast_for_date: Optional[date_type] = None
+    source_quality: SourceQuality = "live"
+    notes: Optional[str] = None
+
+
 class ProviderResult(BaseModel):
     status: Literal["ok", "error"]
     data: Optional[Any] = None
     error: Optional[str] = None
     elapsed_ms: Optional[int] = None
+    normalized: Optional[WeatherSnapshot] = None
+
+
+class AggregatedResult(BaseModel):
+    providers: Dict[str, ProviderResult]
+    normalized: Dict[str, WeatherSnapshot]
+    summary: str
 
 
 class WeatherResponse(BaseModel):
     raw_input: WeatherQuery
     transformed_inputs: TransformedInputs
-    result: dict[str, Any]
+    result: Dict[str, Any]
