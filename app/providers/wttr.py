@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 import httpx
 
 from app.config import settings
@@ -16,7 +18,7 @@ class WttrProvider(WeatherProvider):
         query: WeatherQuery,
         transformed: TransformedInputs,
     ):
-        url = f"{settings.wttr_url}/{query.city}"
+        url = f"{settings.wttr_url}/{quote(query.city, safe='')}"
         resp = await client.get(url, timeout=settings.request_timeout_seconds)
         resp.raise_for_status()
         return resp.json()
