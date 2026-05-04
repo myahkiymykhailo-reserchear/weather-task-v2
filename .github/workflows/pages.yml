@@ -1,0 +1,52 @@
+name: Publish UI to GitHub Pages
+
+# Publishes the static UI under app/static/ to GitHub Pages on every
+# push to main. The Pages site only contains the UI — the FastAPI
+# server is not deployed by this workflow. The UI's "API server" field
+# lets users point it at any reachable backend (run locally with
+# WEATHER_CORS_ALLOW_ORIGINS set to the github.io origin, or hosted
+# anywhere CORS-allows your Pages URL).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Single concurrent publish; cancel queued runs in favour of the latest.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Stage Pages site
+        run: |
+          set -euo pipefail
+          mkdir -p _site/static
+          cp app/static/index.html _site/index.html
+          cp app/static/style.css  _site/static/style.css
+          cp app/static/app.js     _site/static/app.js
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
