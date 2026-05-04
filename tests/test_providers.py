@@ -199,68 +199,56 @@ def test_haversine_known_distance():
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_oceandrivers_returns_message_when_no_nearby_station(query, transformed):
-    respx.get("https://api.oceandrivers.com/v1.0/getStations/").mock(
-        return_value=httpx.Response(
-            200,
-            json=[{"stationName": "PalmaPort", "latitude": 39.56, "longitude": 2.65}],
-        )
-    )
+async def test_oceandrivers_returns_out_of_region_for_far_query(query, transformed):
+    """transformed fixture is New York; OceanDrivers' single station is in Mallorca,
+    well over the 200 km coverage radius — provider should not call upstream."""
+    route = respx.get(
+        "https://api.oceandrivers.com/v1.0/getAemetStation/AreaPalma/lastdata/"
+    ).mock(return_value=httpx.Response(200, json={"TEMPERATURE": 20.0}))
     async with httpx.AsyncClient() as client:
         result = await OceanDriversProvider().safe_fetch(client, query, transformed)
     assert result.status == "ok"
-    assert "No station within" in result.data["message"]
-    assert result.data["stations_checked"] == 1
+    assert not route.called  # never called: out of region
+    assert result.data["in_region"] is False
+    assert result.normalized.source_quality == "live"
+    assert "OceanDrivers covers Spanish marine waters" in result.normalized.notes
 
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_oceandrivers_handles_zero_coordinate_station():
-    """Regression: 0.0 latitude/longitude must not be treated as missing."""
+async def test_oceandrivers_fetches_data_when_query_within_region():
+    """A query near Palma should successfully fetch the AreaPalma station."""
     from datetime import date
 
     from app.models import TransformedInputs, WeatherQuery
 
-    near_equator = TransformedInputs(
-        lat=0.5,
-        lon=0.5,
-        timezone="UTC",
-        resolved_name="Test",
-        country_code="XX",
-        date=date(2026, 5, 4),
-        units="celsius",
+    near_palma = TransformedInputs(
+        lat=39.6, lon=2.65, timezone="Europe/Madrid",
+        resolved_name="Palma, ES", country_code="ES",
+        date=date(2026, 5, 4), units="celsius",
     )
-    q = WeatherQuery(city="Test", country="XX", units="celsius")
+    q = WeatherQuery(city="Palma", country="ES", units="celsius")
 
-    respx.get("https://api.oceandrivers.com/v1.0/getStations/").mock(
+    respx.get(
+        "https://api.oceandrivers.com/v1.0/getAemetStation/AreaPalma/lastdata/"
+    ).mock(
         return_value=httpx.Response(
             200,
-            json=[{"stationName": "EquatorStation", "latitude": 0.0, "longitude": 0.0}],
+            json={
+                "TEMPERATURE": 20.2,
+                "HUMIDITY": 83.0,
+                "TWS": 6.667,           # m/s ≈ 24 km/h
+                "TWD": 225,
+                "RAIN_DAY": 0.0,
+            },
         )
     )
-    respx.get("https://api.oceandrivers.com/v1.0/getMeteo/EquatorStation/en/json").mock(
-        return_value=httpx.Response(200, json={"temperatureC": 28.0})
-    )
     async with httpx.AsyncClient() as client:
-        result = await OceanDriversProvider().safe_fetch(client, q, near_equator)
+        result = await OceanDriversProvider().safe_fetch(client, q, near_palma)
     assert result.status == "ok"
-    assert result.data["station"] == "EquatorStation"
-
-
-@pytest.mark.asyncio
-@respx.mock
-async def test_oceandrivers_fetches_meteo_when_station_close(query, transformed):
-    respx.get("https://api.oceandrivers.com/v1.0/getStations/").mock(
-        return_value=httpx.Response(
-            200,
-            json=[{"stationName": "ManhattanMarina", "latitude": 40.72, "longitude": -74.01}],
-        )
-    )
-    respx.get("https://api.oceandrivers.com/v1.0/getMeteo/ManhattanMarina/en/json").mock(
-        return_value=httpx.Response(200, json={"temperatureC": 19.0})
-    )
-    async with httpx.AsyncClient() as client:
-        result = await OceanDriversProvider().safe_fetch(client, query, transformed)
-    assert result.status == "ok"
-    assert result.data["station"] == "ManhattanMarina"
-    assert result.data["meteo"]["temperatureC"] == 19.0
+    assert result.data["in_region"] is True
+    snap = result.normalized
+    assert snap.temperature_c == 20.2
+    assert snap.humidity_pct == 83.0
+    assert snap.wind_kph == pytest.approx(6.667 * 3.6)
+    assert snap.wind_direction_deg == 225.0

@@ -19,7 +19,22 @@ def haversine(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 
 class OceanDriversProvider(WeatherProvider):
-    """Marine weather. Looks up the nearest known station, then queries it."""
+    """OceanDrivers AEMET station — Spanish marine weather (regional).
+
+    Background: v0.2 of this provider fetched a non-existent
+    ``/v1.0/getStations/`` endpoint and 404'd on every call. The real API
+    documented at https://api.oceandrivers.com/static/docs.html exposes
+    ``/v1.0/getAemetStation/{stationName}/{period}/`` and friends. The
+    public catalogue effectively serves a single usable station,
+    ``AreaPalma`` at (39.5604, 2.7417) in Mallorca; other names alias to
+    the same data.
+
+    Strategy: compute distance from the user's query to that station.
+    If within ``oceandrivers_max_station_km`` (default 200 km), fetch
+    the station's last data. Otherwise emit a *live* (not fallback)
+    snapshot whose ``notes`` make clear the data is genuinely
+    unavailable for the queried region.
+    """
 
     name = "oceandrivers"
 
@@ -29,115 +44,83 @@ class OceanDriversProvider(WeatherProvider):
         query: WeatherQuery,
         transformed: TransformedInputs,
     ):
-        resp = await client.get(
-            settings.oceandrivers_stations_url,
-            timeout=settings.request_timeout_seconds,
+        distance_km = haversine(
+            transformed.lat,
+            transformed.lon,
+            settings.oceandrivers_station_lat,
+            settings.oceandrivers_station_lon,
         )
-        resp.raise_for_status()
-        stations = resp.json()
-
-        if not isinstance(stations, list) or not stations:
-            return {"message": "No stations available", "stations_checked": 0}
-
-        nearest, distance_km = self._find_nearest(stations, transformed.lat, transformed.lon)
-        if nearest is None:
-            return {"message": "No usable station coordinates", "stations_checked": len(stations)}
 
         if distance_km > settings.oceandrivers_max_station_km:
             return {
-                "message": f"No station within {settings.oceandrivers_max_station_km}km",
-                "stations_checked": len(stations),
-                "nearest_distance_km": round(distance_km, 2),
+                "in_region": False,
+                "nearest_station": settings.oceandrivers_station_name,
+                "nearest_station_km": round(distance_km, 1),
+                "limit_km": settings.oceandrivers_max_station_km,
             }
 
-        station_id = _first_non_none(
-            nearest.get("stationName"), nearest.get("name"), nearest.get("id")
+        url = (
+            f"{settings.oceandrivers_url}/v1.0/getAemetStation/"
+            f"{settings.oceandrivers_station_name}/lastdata/"
         )
-        if not station_id:
-            return {
-                "message": "Nearest station has no identifier",
-                "nearest": nearest,
-                "distance_km": round(distance_km, 2),
-            }
-
-        meteo_url = f"{settings.oceandrivers_meteo_url}/{station_id}/en/json"
-        meteo_resp = await client.get(meteo_url, timeout=settings.request_timeout_seconds)
-        meteo_resp.raise_for_status()
+        resp = await client.get(url, timeout=settings.request_timeout_seconds)
+        resp.raise_for_status()
         return {
-            "station": station_id,
-            "distance_km": round(distance_km, 2),
-            "meteo": meteo_resp.json(),
+            "in_region": True,
+            "station": settings.oceandrivers_station_name,
+            "distance_km": round(distance_km, 1),
+            "data": resp.json(),
         }
 
     def normalize(self, raw: Any, transformed: TransformedInputs) -> WeatherSnapshot:
         raw = raw or {}
-        meteo = raw.get("meteo")
-        if not isinstance(meteo, dict):
-            # No usable station — surface as a "no data" snapshot, but live (not fallback).
+
+        if not raw.get("in_region"):
+            d = raw.get("nearest_station_km")
             return WeatherSnapshot(
                 is_forecast=False,
                 forecast_for_date=transformed.date,
                 source_quality="live",
-                notes=raw.get("message") or "No marine station data available.",
+                notes=(
+                    f"OceanDrivers covers Spanish marine waters. Nearest station "
+                    f"({raw.get('nearest_station')}) is {d} km away — outside the "
+                    f"{raw.get('limit_km')} km coverage radius for this query."
+                ),
             )
 
-        # OceanDrivers schemas vary by station. Probe likely keys defensively.
-        temp = _first_number(meteo, "temperatureC", "temperature_c", "temperature", "tempC", "temp")
-        humid = _first_number(meteo, "humidity", "relativeHumidity", "humidityPct", "rh")
-        wind = _first_number(meteo, "windSpeedKph", "windSpeed", "windSpeed_kph", "wind")
+        data = raw.get("data") or {}
         return WeatherSnapshot(
-            temperature_c=temp,
-            humidity_pct=humid,
-            wind_kph=wind,
+            temperature_c=_as_float(data.get("TEMPERATURE")),
+            humidity_pct=_as_float(data.get("HUMIDITY")),
+            wind_kph=_ms_to_kph(_as_float(data.get("TWS"))),
+            wind_direction_deg=_as_float(data.get("TWD")),
+            precipitation_mm=_as_float(data.get("RAIN_DAY")),
             is_forecast=False,
             forecast_for_date=transformed.date,
             source_quality="live",
-            notes=f"Station {raw.get('station')} at {raw.get('distance_km')}km",
+            notes=f"AEMET station {raw.get('station')} at {raw.get('distance_km')} km",
         )
 
     def fallback(self, transformed: TransformedInputs) -> WeatherSnapshot:
         return WeatherSnapshot(
-            temperature_c=17.0,
-            wind_kph=15.0,
+            temperature_c=18.0,
             humidity_pct=70.0,
+            wind_kph=12.0,
             is_forecast=False,
             forecast_for_date=transformed.date,
             source_quality="fallback",
             notes="OceanDrivers unavailable; placeholder example data.",
         )
 
-    @staticmethod
-    def _find_nearest(stations: list, lat: float, lon: float):
-        best, best_d = None, float("inf")
-        for s in stations:
-            raw_lat = _first_non_none(s.get("latitude"), s.get("lat"))
-            raw_lon = _first_non_none(s.get("longitude"), s.get("lon"))
-            if raw_lat is None or raw_lon is None:
-                continue
-            try:
-                slat = float(raw_lat)
-                slon = float(raw_lon)
-            except (TypeError, ValueError):
-                continue
-            d = haversine(lat, lon, slat, slon)
-            if d < best_d:
-                best_d = d
-                best = s
-        return best, best_d
+
+def _as_float(v: Any) -> Optional[float]:
+    if v is None:
+        return None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
 
 
-def _first_non_none(*values):
-    for v in values:
-        if v is not None:
-            return v
-    return None
-
-
-def _first_number(d: dict, *keys: str) -> Optional[float]:
-    for k in keys:
-        if k in d:
-            try:
-                return float(d[k])
-            except (TypeError, ValueError):
-                continue
-    return None
+def _ms_to_kph(v: Optional[float]) -> Optional[float]:
+    return v * 3.6 if v is not None else None
