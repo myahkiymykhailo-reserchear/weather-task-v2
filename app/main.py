@@ -32,6 +32,9 @@ async def lifespan(app: FastAPI):
     app.state.http_client = httpx.AsyncClient(
         limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
         timeout=httpx.Timeout(settings.request_timeout_seconds),
+        # 7Timer (and others) issue 302 redirects from /bin/api.pl to /bin/civil.php;
+        # default httpx behaviour is to surface the redirect as a 3xx error.
+        follow_redirects=True,
     )
     try:
         yield

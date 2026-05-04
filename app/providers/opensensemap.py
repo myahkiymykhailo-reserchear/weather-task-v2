@@ -24,6 +24,11 @@ class OpenSenseMapProvider(WeatherProvider):
 
     name = "opensensemap"
     max_boxes_returned = 3
+    # Per-box detail calls are bounded tighter than the overall provider
+    # timeout: openSenseMap occasionally takes 5–8 s to serve a single
+    # cold-cache box, but the list call is reliably fast and any subset
+    # of boxes is enough to derive an aggregate temperature/humidity.
+    box_detail_timeout_seconds = 3.0
 
     async def fetch(
         self,
@@ -51,7 +56,7 @@ class OpenSenseMapProvider(WeatherProvider):
             *(
                 client.get(
                     f"{settings.opensensemap_url}/{box_id}",
-                    timeout=settings.request_timeout_seconds,
+                    timeout=self.box_detail_timeout_seconds,
                 )
                 for box_id in nearest_ids
             ),
