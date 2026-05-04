@@ -76,6 +76,73 @@ async def test_geocode_raises_on_no_results():
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_geocode_raises_on_country_mismatch_no_silent_fallback():
+    """P1.4 regression: when country is supplied but no result matches,
+    raise GeocodingError instead of silently returning the first row."""
+    payload = {
+        "results": [
+            {
+                "name": "Paris",
+                "latitude": 48.85,
+                "longitude": 2.35,
+                "country": "France",
+                "country_code": "FR",
+                "admin1": "Île-de-France",
+            },
+            {
+                "name": "Paris",
+                "latitude": 33.66,
+                "longitude": -95.55,
+                "country": "United States",
+                "country_code": "US",
+                "admin1": "Texas",
+            },
+        ]
+    }
+    respx.get("https://geocoding-api.open-meteo.com/v1/search").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with httpx.AsyncClient() as client:
+        with pytest.raises(GeocodingError) as exc_info:
+            await geocode(client, WeatherQuery(city="Paris", country="JP", units="celsius"))
+    assert "JP" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_geocode_normalises_country_aliases():
+    """P1.5: 'USA' / 'United States' / 'us' all reach the US row."""
+    from app.geocoding import normalize_country
+
+    assert normalize_country("USA") == ("usa", "us")
+    assert normalize_country("United States") == ("united states", "us")
+    assert normalize_country("us") == ("us", "us")
+    assert normalize_country("DE") == ("de", "de")
+    assert normalize_country("Deutschland") == ("deutschland", "de")
+    assert normalize_country("Atlantis") == ("atlantis", None)
+
+    payload = {
+        "results": [
+            {
+                "name": "New York",
+                "latitude": 40.71,
+                "longitude": -74.0,
+                "country": "United States",
+                "country_code": "US",
+                "admin1": "New York",
+            }
+        ]
+    }
+    respx.get("https://geocoding-api.open-meteo.com/v1/search").mock(
+        return_value=httpx.Response(200, json=payload)
+    )
+    async with httpx.AsyncClient() as client:
+        out = await geocode(client, WeatherQuery(city="New York", country="USA", units="celsius"))
+    assert out.country_code == "US"
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_geocode_uses_query_date():
     payload = {
         "results": [
