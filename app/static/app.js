@@ -14,11 +14,38 @@
 
     const $ = (id) => document.getElementById(id);
 
+    // ---- API base URL --------------------------------------------------------
+    // Same-origin by default. Override via ?api=<URL> or persisted localStorage.
+    // When hosted on GitHub Pages there's no API on the same origin, so we
+    // default to a local uvicorn — the user is expected to run the server
+    // themselves, with WEATHER_CORS_ALLOW_ORIGINS set.
+
+    const STORAGE_KEY = "weather_api_base";
+    const isGitHubPages = location.hostname.endsWith(".github.io");
+    const queryApi = new URLSearchParams(location.search).get("api");
+    const savedApi = localStorage.getItem(STORAGE_KEY);
+    const defaultApi = isGitHubPages ? "http://127.0.0.1:8000" : "";
+    const apiBaseInitial = (queryApi || savedApi || defaultApi).replace(/\/$/, "");
+
     const form = $("weather-form");
     const cityInput = $("city");
     const countryInput = $("country");
+    const apiInput = $("api-base");
     const submitBtn = $("submit");
     const formHint = $("form-hint");
+
+    if (apiInput) {
+        apiInput.value = apiBaseInitial;
+        apiInput.addEventListener("change", () => {
+            const v = apiInput.value.trim().replace(/\/$/, "");
+            if (v) localStorage.setItem(STORAGE_KEY, v);
+            else localStorage.removeItem(STORAGE_KEY);
+        });
+    }
+
+    function currentApiBase() {
+        return apiInput ? apiInput.value.trim().replace(/\/$/, "") : "";
+    }
 
     const resultsEl = $("results");
     const stepGeocode = $("step-geocode");
@@ -69,7 +96,7 @@
         if (date) params.set("date", date);
         params.set("units", units);
 
-        const url = `/weather?${params.toString()}`;
+        const url = `${currentApiBase()}/weather?${params.toString()}`;
         const startedAt = performance.now();
 
         try {

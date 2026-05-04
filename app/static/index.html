@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Weather Aggregator</title>
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
     <main>
@@ -50,6 +50,12 @@
         <section class="form-section" aria-labelledby="form-heading">
             <h2 id="form-heading">Query</h2>
             <form id="weather-form" autocomplete="off" novalidate>
+                <label class="field api-base-field">
+                    <span class="label-text">API server <em>(blank = same origin)</em></span>
+                    <input id="api-base" name="api-base" type="text" placeholder="http://127.0.0.1:8000">
+                    <small class="hint-inline">Hosting this page on GitHub Pages? Set this to the URL where you run <code>uvicorn app.main:app</code> and start that server with <code>WEATHER_CORS_ALLOW_ORIGINS</code> set to your Pages origin. Saved in your browser only.</small>
+                </label>
+
                 <div class="grid">
                     <label class="field required">
                         <span class="label-text">City <em>required</em></span>
@@ -131,6 +137,6 @@
         </p>
     </footer>
 
-    <script src="/static/app.js" defer></script>
+    <script src="static/app.js" defer></script>
 </body>
 </html>

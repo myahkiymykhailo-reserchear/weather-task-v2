@@ -178,8 +178,9 @@ def test_root_serves_html_ui(client):
     assert resp.headers["content-type"].startswith("text/html")
     body = resp.text
     assert "<title>Weather Aggregator</title>" in body
-    assert "/static/style.css" in body
-    assert "/static/app.js" in body
+    # Relative paths so the same HTML works under FastAPI (/) and on GitHub Pages (/REPO/).
+    assert "static/style.css" in body
+    assert "static/app.js" in body
 
 
 def test_static_assets_are_served(client):
