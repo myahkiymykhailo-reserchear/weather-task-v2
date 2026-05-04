@@ -1,0 +1,36 @@
+# Local dev / smoke-test wrapper around the API container.
+#
+#   docker compose up --build
+#   curl http://127.0.0.1:8000/livez
+#   curl 'http://127.0.0.1:8000/weather?city=Berlin&country=DE'
+#
+# DNS notes
+# ---------
+# The service queries six external hosts (Open-Meteo geocoder + 5 providers).
+# Some macOS / corporate-VPN setups push only IPv6 DNS into the Docker VM,
+# which causes intermittent NXDOMAIN failures. `dns:` below pins public
+# resolvers (Cloudflare + Google) so DNS works regardless of the host's
+# resolver config — comment the block out if your environment already
+# resolves cleanly.
+services:
+  weather:
+    build: .
+    image: weather-prediction:dev
+    container_name: weather-prediction
+    ports:
+      - "8000:8000"
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+    environment:
+      WEATHER_LOG_LEVEL: ${WEATHER_LOG_LEVEL:-INFO}
+      WEATHER_REQUEST_TIMEOUT_SECONDS: ${WEATHER_REQUEST_TIMEOUT_SECONDS:-8.0}
+      WEATHER_TOTAL_REQUEST_BUDGET_SECONDS: ${WEATHER_TOTAL_REQUEST_BUDGET_SECONDS:-12.0}
+      WEATHER_CORS_ALLOW_ORIGINS: ${WEATHER_CORS_ALLOW_ORIGINS:-}
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "3", "http://127.0.0.1:8000/livez"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
+    restart: unless-stopped
