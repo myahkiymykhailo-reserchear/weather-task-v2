@@ -15,7 +15,11 @@ class Settings(BaseSettings):
 
     geocoding_url: str = "https://geocoding-api.open-meteo.com/v1/search"
     open_meteo_forecast_url: str = "https://api.open-meteo.com/v1/forecast"
-    wttr_url: str = "https://goweather.xyz/weather"
+    # The originally-listed robertoduessmann/weather-api host (goweather.xyz)
+    # has been offline since at least 2026-05 — every path returns 404. wttr.in
+    # is the well-maintained alternative in the same "easy weather" family;
+    # it accepts city names as the path and returns JSON via ?format=j1.
+    wttr_url: str = "https://wttr.in"
     opensensemap_url: str = "https://api.opensensemap.org/boxes"
     seven_timer_url: str = "https://www.7timer.info/bin/api.pl"
     oceandrivers_stations_url: str = "https://api.oceandrivers.com/v1.0/getStations/"

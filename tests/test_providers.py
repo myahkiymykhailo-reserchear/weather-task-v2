@@ -36,16 +36,37 @@ async def test_open_meteo_fetch_passes_units_and_date(query, transformed):
     assert sent.url.params["end_date"] == transformed.date.isoformat()
 
 
+_WTTR_BERLIN_BODY = {
+    "current_condition": [
+        {
+            "temp_C": "18",
+            "FeelsLikeC": "17",
+            "humidity": "65",
+            "windspeedKmph": "12",
+            "cloudcover": "30",
+            "precipMM": "0.0",
+            "weatherDesc": [{"value": "Partly cloudy"}],
+        }
+    ]
+}
+
+
 @pytest.mark.asyncio
 @respx.mock
-async def test_wttr_uses_city_in_path(query, transformed):
-    respx.get("https://goweather.xyz/weather/New%20York").mock(
-        return_value=httpx.Response(200, json={"temperature": "+18 °C", "wind": "10 km/h"})
+async def test_wttr_uses_city_in_path_and_normalises_j1_schema(query, transformed):
+    route = respx.get("https://wttr.in/New%20York").mock(
+        return_value=httpx.Response(200, json=_WTTR_BERLIN_BODY)
     )
     async with httpx.AsyncClient() as client:
         result = await WttrProvider().safe_fetch(client, query, transformed)
     assert result.status == "ok"
-    assert result.data["temperature"] == "+18 °C"
+    # Normalisation should pick up the wttr.in j1 schema.
+    assert result.normalized.temperature_c == 18.0
+    assert result.normalized.humidity_pct == 65.0
+    assert result.normalized.wind_kph == 12.0
+    assert result.normalized.conditions == "Partly cloudy"
+    # Confirm format=j1 is sent.
+    assert route.calls.last.request.url.params["format"] == "j1"
 
 
 @pytest.mark.asyncio
@@ -54,8 +75,8 @@ async def test_wttr_url_encodes_city_with_spaces_and_diacritics(transformed):
     from app.models import WeatherQuery
 
     sao_paulo = WeatherQuery(city="São Paulo", country="BR", units="celsius")
-    route = respx.get("https://goweather.xyz/weather/S%C3%A3o%20Paulo").mock(
-        return_value=httpx.Response(200, json={"temperature": "+22 °C"})
+    route = respx.get("https://wttr.in/S%C3%A3o%20Paulo").mock(
+        return_value=httpx.Response(200, json=_WTTR_BERLIN_BODY)
     )
     async with httpx.AsyncClient() as client:
         result = await WttrProvider().safe_fetch(client, sao_paulo, transformed)
@@ -68,7 +89,7 @@ async def test_wttr_url_encodes_city_with_spaces_and_diacritics(transformed):
 async def test_provider_returns_fallback_on_read_timeout(query, transformed):
     """P4.2: an httpx.ReadTimeout from upstream is converted to a
     fallback ProviderResult so the rest of the response is unaffected."""
-    respx.get("https://goweather.xyz/weather/New%20York").mock(
+    respx.get("https://wttr.in/New%20York").mock(
         side_effect=httpx.ReadTimeout("upstream took too long")
     )
     async with httpx.AsyncClient() as client:
@@ -83,7 +104,7 @@ async def test_provider_returns_fallback_on_read_timeout(query, transformed):
 @pytest.mark.asyncio
 @respx.mock
 async def test_provider_records_error_on_5xx(query, transformed):
-    respx.get("https://goweather.xyz/weather/New%20York").mock(return_value=httpx.Response(500))
+    respx.get("https://wttr.in/New%20York").mock(return_value=httpx.Response(500))
     async with httpx.AsyncClient() as client:
         result = await WttrProvider().safe_fetch(client, query, transformed)
     assert result.status == "error"

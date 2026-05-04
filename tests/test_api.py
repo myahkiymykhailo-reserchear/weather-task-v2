@@ -46,10 +46,19 @@ def test_weather_endpoint_aggregates_all_providers(client):
             },
         )
     )
-    respx.get(url__startswith="https://goweather.xyz/weather/").mock(
+    respx.get(url__startswith="https://wttr.in/").mock(
         return_value=httpx.Response(
             200,
-            json={"temperature": "+19 °C", "wind": "5 km/h", "description": "Sunny"},
+            json={
+                "current_condition": [
+                    {
+                        "temp_C": "19",
+                        "humidity": "60",
+                        "windspeedKmph": "5",
+                        "weatherDesc": [{"value": "Sunny"}],
+                    }
+                ]
+            },
         )
     )
     respx.get("https://api.opensensemap.org/boxes").mock(return_value=httpx.Response(200, json=[]))
@@ -116,8 +125,20 @@ def test_weather_endpoint_isolates_provider_failure(client):
         )
     )
     respx.get("https://api.open-meteo.com/v1/forecast").mock(return_value=httpx.Response(500))
-    respx.get(url__startswith="https://goweather.xyz/weather/").mock(
-        return_value=httpx.Response(200, json={"temperature": "+15 °C"})
+    respx.get(url__startswith="https://wttr.in/").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "current_condition": [
+                    {
+                        "temp_C": "15",
+                        "humidity": "70",
+                        "windspeedKmph": "8",
+                        "weatherDesc": [{"value": "Cloudy"}],
+                    }
+                ]
+            },
+        )
     )
     respx.get("https://api.opensensemap.org/boxes").mock(return_value=httpx.Response(200, json=[]))
     respx.get("https://api.oceandrivers.com/v1.0/getStations/").mock(
