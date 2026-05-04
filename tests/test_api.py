@@ -70,9 +70,17 @@ def test_weather_endpoint_aggregates_all_providers(client):
     assert data["raw_input"]["units"] == "celsius"
     assert data["transformed_inputs"]["lat"] == 40.7
     assert data["transformed_inputs"]["lon"] == -74.0
+
+    providers = data["result"]["providers"]
+    normalized = data["result"]["normalized"]
     for name in ["open_meteo", "wttr", "opensensemap", "oceandrivers", "seven_timer"]:
-        assert name in data["result"], f"missing provider {name}"
-        assert data["result"][name]["status"] in {"ok", "error"}
+        assert name in providers, f"missing provider {name}"
+        assert providers[name]["status"] in {"ok", "error"}
+        # Every provider — ok or error — exposes a normalised snapshot.
+        assert "normalized" in providers[name]
+        assert name in normalized
+        assert normalized[name]["source_quality"] in {"live", "fallback"}
+
     assert "summary" in data["result"]
     assert "average" in data["result"]["summary"]
 
@@ -124,9 +132,13 @@ def test_weather_endpoint_isolates_provider_failure(client):
     resp = client.get("/weather", params={"city": "Berlin", "country": "DE"})
     assert resp.status_code == 200
     body = resp.json()
-    assert body["result"]["open_meteo"]["status"] == "error"
-    assert body["result"]["wttr"]["status"] == "ok"
-    assert body["result"]["seven_timer"]["status"] == "ok"
+    providers = body["result"]["providers"]
+    assert providers["open_meteo"]["status"] == "error"
+    assert providers["wttr"]["status"] == "ok"
+    assert providers["seven_timer"]["status"] == "ok"
+    # The failed provider still returns a normalised fallback snapshot.
+    assert providers["open_meteo"]["normalized"]["source_quality"] == "fallback"
+    assert providers["wttr"]["normalized"]["source_quality"] == "live"
 
 
 def test_health(client):

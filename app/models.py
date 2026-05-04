@@ -68,4 +68,4 @@ class AggregatedResult(BaseModel):
 class WeatherResponse(BaseModel):
     raw_input: WeatherQuery
     transformed_inputs: TransformedInputs
-    result: Dict[str, Any]
+    result: AggregatedResult
