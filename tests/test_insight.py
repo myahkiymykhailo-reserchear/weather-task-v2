@@ -1,7 +1,6 @@
 """Direct tests for app.insight (P4.1)."""
-from datetime import date
 
-import pytest
+from datetime import date
 
 from app.insight import build_insight
 from app.models import ProviderResult, TransformedInputs, WeatherSnapshot
@@ -67,16 +66,8 @@ def test_build_insight_consensus_conditions():
 
 def test_build_insight_includes_precipitation_and_wind_when_available():
     providers = {
-        "a": _ok(
-            WeatherSnapshot(
-                temperature_c=10.0, precipitation_mm=2.5, wind_kph=20.0
-            )
-        ),
-        "b": _ok(
-            WeatherSnapshot(
-                temperature_c=12.0, precipitation_mm=1.5, wind_kph=10.0
-            )
-        ),
+        "a": _ok(WeatherSnapshot(temperature_c=10.0, precipitation_mm=2.5, wind_kph=20.0)),
+        "b": _ok(WeatherSnapshot(temperature_c=12.0, precipitation_mm=1.5, wind_kph=10.0)),
     }
     summary = build_insight(_transformed(), providers)
     assert "2.0mm" in summary  # avg precip

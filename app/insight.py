@@ -1,10 +1,9 @@
 from collections import Counter
-from typing import Dict, List, Tuple
 
 from app.models import ProviderResult, TransformedInputs, WeatherSnapshot
 
 
-def build_insight(transformed: TransformedInputs, providers: Dict[str, ProviderResult]) -> str:
+def build_insight(transformed: TransformedInputs, providers: dict[str, ProviderResult]) -> str:
     """Produce a short human-friendly summary across providers.
 
     Reads each provider's normalised ``WeatherSnapshot`` (always Celsius)
@@ -17,7 +16,7 @@ def build_insight(transformed: TransformedInputs, providers: Dict[str, ProviderR
     a count is appended so the user knows how much of the answer was
     placeholder data.
     """
-    snapshots: Dict[str, WeatherSnapshot] = {
+    snapshots: dict[str, WeatherSnapshot] = {
         name: pr.normalized for name, pr in providers.items() if pr.normalized
     }
     location = transformed.resolved_name or f"({transformed.lat:.2f}, {transformed.lon:.2f})"
@@ -25,7 +24,7 @@ def build_insight(transformed: TransformedInputs, providers: Dict[str, ProviderR
     if not snapshots:
         return f"No weather snapshots available for {location} on {transformed.date}."
 
-    temps_c: List[Tuple[str, float]] = [
+    temps_c: list[tuple[str, float]] = [
         (name, snap.temperature_c)
         for name, snap in snapshots.items()
         if snap.temperature_c is not None
@@ -34,7 +33,7 @@ def build_insight(transformed: TransformedInputs, providers: Dict[str, ProviderR
         name for name, snap in snapshots.items() if snap.source_quality == "fallback"
     ]
 
-    parts: List[str] = []
+    parts: list[str] = []
 
     if temps_c:
         avg_c = sum(t for _, t in temps_c) / len(temps_c)

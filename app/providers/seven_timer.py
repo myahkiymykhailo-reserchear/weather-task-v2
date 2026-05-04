@@ -6,7 +6,6 @@ from app.config import settings
 from app.models import TransformedInputs, WeatherQuery, WeatherSnapshot
 from app.providers.base import WeatherProvider
 
-
 # 7Timer's `civil` product reports cloudcover and wind speed on integer scales:
 #   cloudcover: 1=0-6%, 2=6-19%, 3=19-31%, 4=31-44%, 5=44-56%, 6=56-69%, 7=69-81%, 8=81-94%, 9=94-100%
 #   wind10m.speed: Beaufort-ish band index 1..8; map midpoints to km/h.
@@ -87,10 +86,16 @@ class SevenTimerProvider(WeatherProvider):
         return WeatherSnapshot(
             temperature_c=_as_float(first.get("temp2m")),
             humidity_pct=_parse_pct(first.get("rh2m")),
-            wind_kph=_WIND_BAND_KPH.get(wind10m.get("speed")) if isinstance(wind10m.get("speed"), int) else None,
+            wind_kph=_WIND_BAND_KPH.get(wind10m.get("speed"))
+            if isinstance(wind10m.get("speed"), int)
+            else None,
             wind_direction_deg=None,  # 7Timer reports compass letters, not degrees.
-            cloud_cover_pct=_CLOUDCOVER_PCT_MIDPOINTS.get(cloud) if isinstance(cloud, int) else None,
-            conditions=_WEATHER_TEXT.get(weather_key, weather_key) if isinstance(weather_key, str) else None,
+            cloud_cover_pct=_CLOUDCOVER_PCT_MIDPOINTS.get(cloud)
+            if isinstance(cloud, int)
+            else None,
+            conditions=_WEATHER_TEXT.get(weather_key, weather_key)
+            if isinstance(weather_key, str)
+            else None,
             is_forecast=True,
             forecast_for_date=transformed.date,
             source_quality="live",

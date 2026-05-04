@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import httpx
 
@@ -116,5 +116,5 @@ def _is_humidity(title: str, unit: str) -> bool:
     return ("humid" in title or "feucht" in title or "luftfeucht" in title) and "%" in unit
 
 
-def _avg(values: list[float]) -> Optional[float]:
+def _avg(values: List[float]) -> Optional[float]:
     return sum(values) / len(values) if values else None

@@ -6,7 +6,6 @@ from app.config import settings
 from app.models import TransformedInputs, WeatherQuery, WeatherSnapshot
 from app.providers.base import WeatherProvider
 
-
 # Open-Meteo WMO weather codes — minimal grouping for human-readable text.
 # https://open-meteo.com/en/docs#api_form (Weather code section)
 _WMO_GROUPS = {

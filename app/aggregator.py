@@ -37,12 +37,10 @@ async def aggregate_weather(
 
     budget = settings.total_request_budget_seconds
     provider_results = await asyncio.gather(
-        *(
-            _bounded_safe_fetch(p, client, query, transformed, budget)
-            for p in providers_list
-        )
+        *(_bounded_safe_fetch(p, client, query, transformed, budget) for p in providers_list)
     )
 
+    # noqa: B905 — providers_list and provider_results are zipped in order from the same gather call.
     by_name = {p.name: r for p, r in zip(providers_list, provider_results)}
     normalized = {name: pr.normalized for name, pr in by_name.items() if pr.normalized}
     summary = build_insight(transformed, by_name)

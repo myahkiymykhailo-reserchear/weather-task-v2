@@ -52,9 +52,7 @@ def test_weather_endpoint_aggregates_all_providers(client):
             json={"temperature": "+19 °C", "wind": "5 km/h", "description": "Sunny"},
         )
     )
-    respx.get("https://api.opensensemap.org/boxes").mock(
-        return_value=httpx.Response(200, json=[])
-    )
+    respx.get("https://api.opensensemap.org/boxes").mock(return_value=httpx.Response(200, json=[]))
     respx.get("https://api.oceandrivers.com/v1.0/getStations/").mock(
         return_value=httpx.Response(200, json=[])
     )
@@ -121,9 +119,7 @@ def test_weather_endpoint_isolates_provider_failure(client):
     respx.get(url__startswith="https://goweather.xyz/weather/").mock(
         return_value=httpx.Response(200, json={"temperature": "+15 °C"})
     )
-    respx.get("https://api.opensensemap.org/boxes").mock(
-        return_value=httpx.Response(200, json=[])
-    )
+    respx.get("https://api.opensensemap.org/boxes").mock(return_value=httpx.Response(200, json=[]))
     respx.get("https://api.oceandrivers.com/v1.0/getStations/").mock(
         return_value=httpx.Response(200, json=[])
     )

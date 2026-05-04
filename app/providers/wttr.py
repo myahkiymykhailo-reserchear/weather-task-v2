@@ -8,7 +8,6 @@ from app.config import settings
 from app.models import TransformedInputs, WeatherQuery, WeatherSnapshot
 from app.providers.base import WeatherProvider
 
-
 _NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
 
 

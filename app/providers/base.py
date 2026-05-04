@@ -41,20 +41,17 @@ class WeatherProvider(ABC):
         client: httpx.AsyncClient,
         query: WeatherQuery,
         transformed: TransformedInputs,
-    ) -> Any:
-        ...
+    ) -> Any: ...
 
     @abstractmethod
     def normalize(
         self,
         raw: Any,
         transformed: TransformedInputs,
-    ) -> WeatherSnapshot:
-        ...
+    ) -> WeatherSnapshot: ...
 
     @abstractmethod
-    def fallback(self, transformed: TransformedInputs) -> WeatherSnapshot:
-        ...
+    def fallback(self, transformed: TransformedInputs) -> WeatherSnapshot: ...
 
     async def safe_fetch(
         self,
@@ -69,14 +66,11 @@ class WeatherProvider(ABC):
             try:
                 normalized = self.normalize(data, transformed)
             except Exception as norm_exc:
-                logger.warning(
-                    "%s: normalize() failed: %s", self.name, norm_exc, exc_info=True
-                )
+                logger.warning("%s: normalize() failed: %s", self.name, norm_exc, exc_info=True)
                 normalized = self.fallback(transformed)
                 normalized.source_quality = "fallback"
                 normalized.notes = (
-                    (normalized.notes or "")
-                    + " (normalize failed: see logs)"
+                    (normalized.notes or "") + " (normalize failed: see logs)"
                 ).strip()
             return ProviderResult(
                 status="ok",

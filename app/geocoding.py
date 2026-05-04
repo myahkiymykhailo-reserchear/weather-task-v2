@@ -83,7 +83,7 @@ async def geocode(client: httpx.AsyncClient, query: WeatherQuery) -> Transformed
     )
 
 
-def _pick_best(results: list[dict[str, Any]], query: WeatherQuery) -> Tuple[dict[str, Any], int]:
+def _pick_best(results: list, query: WeatherQuery) -> Tuple[dict, int]:
     country_raw, country_iso = normalize_country(query.country or "")
     state = (query.state or "").strip().lower()
 
@@ -94,13 +94,10 @@ def _pick_best(results: list[dict[str, Any]], query: WeatherQuery) -> Tuple[dict
             cn = (r.get("country") or "").lower()
             if country_iso and cc == country_iso:
                 s += 10
-            elif cn == country_raw:
+            elif cn == country_raw or cc == country_raw:
                 s += 9
-            elif cc == country_raw:
-                s += 9
-        if state:
-            if (r.get("admin1") or "").lower() == state:
-                s += 5
+        if state and (r.get("admin1") or "").lower() == state:
+            s += 5
         return s
 
     best = max(results, key=score)

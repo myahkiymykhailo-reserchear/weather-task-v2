@@ -169,8 +169,13 @@ async def test_oceandrivers_handles_zero_coordinate_station():
     from app.models import TransformedInputs, WeatherQuery
 
     near_equator = TransformedInputs(
-        lat=0.5, lon=0.5, timezone="UTC", resolved_name="Test", country_code="XX",
-        date=date(2026, 5, 4), units="celsius",
+        lat=0.5,
+        lon=0.5,
+        timezone="UTC",
+        resolved_name="Test",
+        country_code="XX",
+        date=date(2026, 5, 4),
+        units="celsius",
     )
     q = WeatherQuery(city="Test", country="XX", units="celsius")
 
