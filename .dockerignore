@@ -15,3 +15,6 @@ build
 tests
 CODE_REVIEW.md
 FIXES_SUMMARY.md
+docker-compose.yml
+.github
+README.md

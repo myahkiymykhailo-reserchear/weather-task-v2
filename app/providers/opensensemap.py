@@ -1,3 +1,4 @@
+import asyncio
 from typing import Any, List, Optional
 
 import httpx
@@ -8,10 +9,26 @@ from app.providers.base import WeatherProvider
 
 
 class OpenSenseMapProvider(WeatherProvider):
-    """Returns nearby citizen-science sensor boxes and their latest measurements."""
+    """Citizen-science sensor boxes near the location.
+
+    Two-step fetch — much faster than asking for full sensors directly:
+
+      1. ``GET /boxes?near=lon,lat&maxDistance=...&minimal=true`` returns a
+         lightweight list (id, name, location) in ~200 ms even for dense
+         areas. The full sensor-rich response can be 800 KB and 8+ s.
+      2. For the N nearest boxes, ``GET /boxes/{id}`` is fetched in
+         parallel via ``asyncio.gather``. Each detail fetch is small
+         (1–3 KB) and fast (~150 ms), so even N=5 stays well under
+         our per-call timeout.
+    """
 
     name = "opensensemap"
-    max_boxes_returned = 5
+    max_boxes_returned = 3
+    # Per-box detail calls are bounded tighter than the overall provider
+    # timeout: openSenseMap occasionally takes 5–8 s to serve a single
+    # cold-cache box, but the list call is reliably fast and any subset
+    # of boxes is enough to derive an aggregate temperature/humidity.
+    box_detail_timeout_seconds = 3.0
 
     async def fetch(
         self,
@@ -19,43 +36,65 @@ class OpenSenseMapProvider(WeatherProvider):
         query: WeatherQuery,
         transformed: TransformedInputs,
     ):
-        params = {
-            "near": f"{transformed.lon},{transformed.lat}",
-            "maxDistance": settings.opensensemap_max_distance_m,
-            "format": "json",
-        }
-        resp = await client.get(
+        list_resp = await client.get(
             settings.opensensemap_url,
-            params=params,
+            params={
+                "near": f"{transformed.lon},{transformed.lat}",
+                "maxDistance": settings.opensensemap_max_distance_m,
+                "minimal": "true",
+            },
             timeout=settings.request_timeout_seconds,
         )
-        resp.raise_for_status()
-        boxes = resp.json() or []
+        list_resp.raise_for_status()
+        boxes = list_resp.json() or []
 
-        slim = [
-            {
-                "name": box.get("name"),
-                "exposure": box.get("exposure"),
-                "currentLocation": box.get("currentLocation"),
-                "sensors": [
-                    {
-                        "title": s.get("title"),
-                        "unit": s.get("unit"),
-                        "lastMeasurement": s.get("lastMeasurement"),
-                    }
-                    for s in (box.get("sensors") or [])
-                ],
-            }
-            for box in boxes[: self.max_boxes_returned]
-        ]
-        return {"nearby_box_count": len(boxes), "boxes": slim}
+        if not boxes:
+            return {"nearby_box_count": 0, "boxes": []}
+
+        nearest_ids = [b.get("_id") for b in boxes[: self.max_boxes_returned] if b.get("_id")]
+        detail_responses = await asyncio.gather(
+            *(
+                client.get(
+                    f"{settings.opensensemap_url}/{box_id}",
+                    timeout=self.box_detail_timeout_seconds,
+                )
+                for box_id in nearest_ids
+            ),
+            return_exceptions=True,
+        )
+
+        detailed = []
+        for r in detail_responses:
+            if isinstance(r, Exception):
+                continue
+            if r.status_code != 200:
+                continue
+            box = r.json()
+            detailed.append(
+                {
+                    "_id": box.get("_id"),
+                    "name": box.get("name"),
+                    "exposure": box.get("exposure"),
+                    "currentLocation": box.get("currentLocation"),
+                    "sensors": [
+                        {
+                            "title": s.get("title"),
+                            "unit": s.get("unit"),
+                            "lastMeasurement": s.get("lastMeasurement"),
+                        }
+                        for s in (box.get("sensors") or [])
+                    ],
+                }
+            )
+
+        return {"nearby_box_count": len(boxes), "boxes": detailed}
 
     def normalize(self, raw: Any, transformed: TransformedInputs) -> WeatherSnapshot:
         raw = raw or {}
         boxes = raw.get("boxes") or []
 
-        temps: list[float] = []
-        humidities: list[float] = []
+        temps: List[float] = []
+        humidities: List[float] = []
         for box in boxes:
             for sensor in box.get("sensors") or []:
                 value = _measurement_value(sensor)
@@ -68,11 +107,14 @@ class OpenSenseMapProvider(WeatherProvider):
                 elif _is_humidity(title, unit):
                     humidities.append(value)
 
+        nearby_count = raw.get("nearby_box_count", 0)
         notes = None
-        if not temps and not humidities:
+        if not boxes:
+            notes = f"No openSenseMap boxes within {settings.opensensemap_max_distance_m / 1000:.0f} km."
+        elif not temps and not humidities:
             notes = (
-                f"{raw.get('nearby_box_count', 0)} box(es) found but none reported "
-                "temperature or humidity in canonical units."
+                f"{nearby_count} box(es) found, "
+                f"{len(boxes)} fetched, but none reported temperature or humidity in canonical units."
             )
 
         return WeatherSnapshot(

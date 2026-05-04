@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Weather Aggregator</title>
+    <link rel="stylesheet" href="static/style.css">
+</head>
+<body>
+    <main>
+        <header>
+            <h1>Weather Aggregator</h1>
+            <p class="tagline">One human-friendly query &rarr; five public weather APIs in parallel.</p>
+        </header>
+
+        <section class="instructions" aria-labelledby="how-to-use">
+            <h2 id="how-to-use">How to use</h2>
+            <ol>
+                <li>Enter a <strong>city</strong> and <strong>country</strong> (required).</li>
+                <li>Optionally pin the <strong>state</strong> (helpful for ambiguous names like &ldquo;Springfield&rdquo;), pick a <strong>date</strong>, choose <strong>units</strong>.</li>
+                <li>Click <em>Get weather</em>. The page will geocode your input, then fan out to five providers in parallel and show you the results plus timing proof.</li>
+            </ol>
+
+            <details class="api-help">
+                <summary>Use this service from the terminal or Postman</summary>
+                <div class="api-help-body">
+                    <p>The endpoint is <code>GET /weather</code> with query params <code>city</code>, <code>country</code> (required), <code>state</code>, <code>date</code> (YYYY-MM-DD), <code>units</code> (<code>celsius</code> | <code>fahrenheit</code>).</p>
+
+                    <p><strong>curl</strong></p>
+                    <pre><code>curl 'http://127.0.0.1:8000/weather?city=Berlin&amp;country=DE'</code></pre>
+
+                    <p><strong>curl with diacritics</strong></p>
+                    <pre><code>curl -G 'http://127.0.0.1:8000/weather' \
+  --data-urlencode 'city=São Paulo' \
+  --data-urlencode 'country=BR'</code></pre>
+
+                    <p><strong>Postman</strong></p>
+                    <ol>
+                        <li>Create a new <code>GET</code> request.</li>
+                        <li>URL: <code>http://127.0.0.1:8000/weather</code></li>
+                        <li>Open the <em>Params</em> tab and add: <code>city=Berlin</code>, <code>country=DE</code>, optionally <code>state</code>, <code>date</code>, <code>units</code>.</li>
+                        <li>Send. The response is JSON; the side-by-side normalised view lives at <code>result.normalized</code>.</li>
+                    </ol>
+
+                    <p>Health checks: <code>GET /livez</code>, <code>GET /readyz</code>, <code>GET /health</code>. OpenAPI/Swagger UI: <a href="/docs">/docs</a>.</p>
+                </div>
+            </details>
+        </section>
+
+        <section class="form-section" aria-labelledby="form-heading">
+            <h2 id="form-heading">Query</h2>
+            <form id="weather-form" autocomplete="off" novalidate>
+                <label class="field api-base-field">
+                    <span class="label-text">API server <em>(blank = same origin)</em></span>
+                    <input id="api-base" name="api-base" type="text" placeholder="http://127.0.0.1:8000">
+                    <small class="hint-inline">Hosting this page on GitHub Pages? Set this to the URL where you run <code>uvicorn app.main:app</code> and start that server with <code>WEATHER_CORS_ALLOW_ORIGINS</code> set to your Pages origin. Saved in your browser only.</small>
+                </label>
+
+                <div class="grid">
+                    <label class="field required">
+                        <span class="label-text">City <em>required</em></span>
+                        <input id="city" name="city" type="text" required minlength="1" placeholder="e.g. Berlin" autofocus>
+                    </label>
+
+                    <label class="field">
+                        <span class="label-text">State / region <em>optional</em></span>
+                        <input id="state" name="state" type="text" placeholder="e.g. New York">
+                    </label>
+
+                    <label class="field required">
+                        <span class="label-text">Country <em>required</em></span>
+                        <input id="country" name="country" type="text" required minlength="1" placeholder="e.g. DE or Germany">
+                    </label>
+
+                    <label class="field">
+                        <span class="label-text">Date <em>optional &mdash; defaults to today</em></span>
+                        <input id="date" name="date" type="date">
+                    </label>
+
+                    <fieldset class="field units">
+                        <legend class="label-text">Units</legend>
+                        <label><input type="radio" name="units" value="celsius" checked> Celsius (&deg;C)</label>
+                        <label><input type="radio" name="units" value="fahrenheit"> Fahrenheit (&deg;F)</label>
+                    </fieldset>
+                </div>
+
+                <p class="hint" id="form-hint">Fill in <em>city</em> and <em>country</em> to unlock the button.</p>
+
+                <button id="submit" type="submit" disabled>Get weather</button>
+            </form>
+        </section>
+
+        <section class="results" id="results" aria-live="polite" hidden>
+            <article class="step" id="step-geocode" hidden>
+                <h2>1 &middot; Transformed input (geocoded)</h2>
+                <p class="step-status" id="geocode-status">Resolving location&hellip;</p>
+                <dl class="kv" id="geocode-details"></dl>
+            </article>
+
+            <article class="step" id="step-providers" hidden>
+                <h2>2 &middot; Provider fan-out (in parallel)</h2>
+                <p class="step-status" id="providers-status">Calling 5 APIs in parallel&hellip;</p>
+                <div class="provider-grid" id="provider-grid"></div>
+            </article>
+
+            <article class="step" id="step-parallelism" hidden>
+                <h2>3 &middot; Parallelism proof</h2>
+                <div class="parallelism">
+                    <div class="proof-numbers">
+                        <div><span class="metric-label">If sequential</span><span class="metric-value" id="sum-ms">&mdash;</span></div>
+                        <div><span class="metric-label">Actually (parallel)</span><span class="metric-value" id="wall-ms">&mdash;</span></div>
+                        <div><span class="metric-label">Speedup</span><span class="metric-value highlight" id="speedup">&mdash;</span></div>
+                    </div>
+                    <div class="proof-bars" id="proof-bars" aria-label="Per-provider elapsed time, with the wall-clock dashed line"></div>
+                    <p class="proof-explainer">Each bar is one provider&rsquo;s server-side time. If we ran them one after another, the total would be the sum (top number). Because <code>asyncio.gather</code> ran them concurrently, the user-visible time is the longest single bar (the dashed line) &mdash; not the sum.</p>
+                </div>
+            </article>
+
+            <article class="step" id="step-summary" hidden>
+                <h2>4 &middot; Aggregated summary</h2>
+                <p class="summary-text" id="summary-text"></p>
+            </article>
+
+            <article class="step" id="step-details" hidden>
+                <h2>5 &middot; Per-API details</h2>
+                <div class="provider-details" id="provider-details"></div>
+            </article>
+
+            <article class="error-banner" id="error-banner" hidden></article>
+        </section>
+    </main>
+
+    <footer>
+        <p>
+            Source: see <a href="/docs">/docs</a> for OpenAPI &middot;
+            <a href="https://github.com/myahkiymykhailo-reserchear/weather-task-v2">repository</a>
+        </p>
+    </footer>
+
+    <script src="static/app.js" defer></script>
+</body>
+</html>

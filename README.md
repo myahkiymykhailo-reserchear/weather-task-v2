@@ -1,12 +1,18 @@
 # weather-prediction
 
-A small FastAPI service that takes human-friendly inputs (`city`, `state`, `country`, `date`, `units`) and returns weather data **aggregated in parallel** from five public APIs, with a unified per-provider snapshot you can scan side-by-side.
+A small FastAPI service that takes human-friendly inputs (`city`, `state`, `country`, `date`, `units`) and returns weather data **aggregated in parallel** from five public APIs, with a unified per-provider snapshot you can scan side-by-side. Ships with a **browser UI** at `/` and is deployable as a Docker container; the UI can additionally be published to GitHub Pages.
 
 - **Geocoding** is done first via Open-Meteo (sequential).
-- **5 weather providers** then run concurrently via `asyncio.gather`: Open-Meteo, wttr/goweather.xyz, openSenseMap, OceanDrivers, 7Timer.
+- **5 weather providers** then run concurrently via `asyncio.gather`: Open-Meteo (forecast), wttr.in, openSenseMap (citizen-science sensors), OceanDrivers (Spanish marine), 7Timer.
 - **Per-provider failures are isolated** — a non-2xx upstream is converted into a fallback `WeatherSnapshot` (clearly tagged `source_quality="fallback"`) so the response is always complete.
 
-> Currently on `dev` (`v0.2`). The response shape changed since `v0.1`: `result.providers`, `result.normalized`, `result.summary` — see [FIXES_SUMMARY.md](FIXES_SUMMARY.md) if you're upgrading.
+> The response shape changed in `v0.2`: `result.providers`, `result.normalized`, `result.summary` — see [FIXES_SUMMARY.md](FIXES_SUMMARY.md) if you're upgrading.
+
+### Provider notes
+
+- **wttr** uses [`wttr.in`](https://wttr.in/) (the well-maintained `chubin/wttr.in`). The originally-listed `robertoduessmann/weather-api` host (`goweather.xyz`) has been offline since 2026-05; every path returns 404.
+- **OceanDrivers** is regional — its public API effectively serves a single station at Palma de Mallorca. For queries within ~200 km of Palma the provider returns live AEMET station data; further away it returns a "covered region" notice (still `source_quality="live"`, just `temperature_c=null`). Tunable via `WEATHER_OCEANDRIVERS_MAX_STATION_KM`.
+- **openSenseMap** does a two-step fetch (fast minimal list + parallel detail) to stay well under the request budget even in dense areas.
 
 ---
 
@@ -40,6 +46,30 @@ curl 'http://127.0.0.1:8000/weather?city=Berlin&country=DE'
 ```
 
 OpenAPI / Swagger UI: **http://127.0.0.1:8000/docs**
+Browser UI: **http://127.0.0.1:8000/** (described below).
+
+---
+
+## The browser UI
+
+Open **http://127.0.0.1:8000/** in a browser. The page shows a short *How to use* block, a collapsible *Use from terminal / Postman* reference, and the form. The submit button stays disabled until both `city` and `country` are filled in.
+
+After submit you'll see five panels appear in sequence:
+
+1. **Transformed input (geocoded)** — the resolved name, lat/lon, timezone, country code, target date and units that the API derived from your raw input.
+2. **Provider fan-out** — five cards, one per upstream API. Each animates from "loading" to "complete" in order of its server-reported `elapsed_ms`, so you can watch the parallel fan-out unfold visually. Cards are colour-coded: green = live, amber = fallback example data, red = hard error (still with a fallback snapshot).
+3. **Parallelism proof** — three numbers (sum of all `elapsed_ms` if sequential, actual JS-measured wall-clock, computed speedup) plus a horizontal bar chart with one bar per provider scaled to the longest one.
+4. **Aggregated summary** — the human sentence the API already produces.
+5. **Per-API details** — each provider's normalised snapshot (temperature, humidity, wind, conditions, fallback-flag, notes) and its raw upstream response in a collapsible panel.
+
+### "API server" field
+
+At the top of the form there is an *API server* input. Default behaviour:
+
+- Empty (= same origin) when the page is served by FastAPI itself.
+- `http://127.0.0.1:8000` when the page is served from `*.github.io`.
+
+You can override via `?api=https://my-api.example.com` in the URL or by typing in the field; the value persists in `localStorage`. This is what makes the UI work both locally and when published to GitHub Pages.
 
 ---
 
@@ -247,7 +277,7 @@ curl -sG 'http://127.0.0.1:8000/weather' \
 pytest -v
 ```
 
-Expected: **29 passed**.
+Expected: **31 passed**.
 
 Run a subset:
 
@@ -273,15 +303,62 @@ CI runs both `ruff check` and `ruff format --check` and gates the test job behin
 
 ## Running with Docker
 
+The recommended path is `docker compose`, which wires environment variables, port mapping, healthcheck, and DNS in one file.
+
 ```bash
-docker build -t weather-prediction:dev .
-docker run --rm -p 8000:8000 weather-prediction:dev
-# Then in another terminal:
+docker compose up --build
+# in another terminal:
 curl 'http://127.0.0.1:8000/livez'
 curl 'http://127.0.0.1:8000/weather?city=Berlin&country=DE'
 ```
 
-The image runs `uvicorn app.main:app` on port 8000 with a built-in HEALTHCHECK that pings `/livez`.
+Why use compose: macOS Docker (and corporate VPNs) sometimes pushes IPv6-only DNS into the Docker VM, which intermittently fails to resolve the upstream provider hosts. [`docker-compose.yml`](docker-compose.yml) pins public resolvers (`1.1.1.1` and `8.8.8.8`) so the container reproducibly reaches the APIs regardless of host network state. Comment the `dns:` block out if your environment already resolves cleanly.
+
+You can also build and run without compose:
+
+```bash
+docker build -t weather-prediction:dev .
+docker run --rm -p 8000:8000 \
+  -e WEATHER_LOG_LEVEL=INFO \
+  weather-prediction:dev
+```
+
+The image:
+
+- Runs as a non-root user (`app`, uid 1000) for defense-in-depth.
+- Uses [`tini`](https://github.com/krallin/tini) as PID 1 so signals are forwarded promptly (Ctrl-C / `docker stop` shuts uvicorn down quickly).
+- Has a `HEALTHCHECK` that pings `/livez` every 30 s.
+
+Environment variables are listed in the [Detailed setup → Configuration](#5-optional-configure-via-environment-variables) section above.
+
+---
+
+## Hosting the UI on GitHub Pages
+
+The `app/static/` UI is published to GitHub Pages on every push to `main` by [`.github/workflows/pages.yml`](.github/workflows/pages.yml). Once enabled, the site lives at `https://USER.github.io/weather-task-v2/`.
+
+**One-time enable on GitHub:**
+
+1. Repository → *Settings* → *Pages*.
+2. Set *Source* to **GitHub Actions**.
+3. Push to `main` (or trigger the workflow manually from the *Actions* tab).
+
+**Connecting the hosted UI to your API:**
+
+The Pages site only contains the UI — there is no FastAPI backend on `github.io`. Two options:
+
+1. **Run the API locally** (simplest, good for personal use). Open the Pages URL, type `http://127.0.0.1:8000` into the *API server* field, and run:
+
+   ```bash
+   WEATHER_CORS_ALLOW_ORIGINS="https://USER.github.io" \
+     uvicorn app.main:app
+   ```
+
+   The `WEATHER_CORS_ALLOW_ORIGINS` value must match the Pages origin exactly (https + hostname, no trailing slash).
+
+2. **Host the API somewhere reachable** (Fly.io, Cloud Run, Render, …) and set the *API server* field on the Pages UI to that URL. The same `WEATHER_CORS_ALLOW_ORIGINS` env var applies.
+
+The *API server* field value persists in `localStorage`, and you can also pre-fill it via `?api=https://my-api.example.com` in the page URL.
 
 ---
 
@@ -290,22 +367,29 @@ The image runs `uvicorn app.main:app` on port 8000 with a built-in HEALTHCHECK t
 ```
 weather-task-v2/
 ├── app/
-│   ├── main.py            # FastAPI app, lifespan, /weather + /livez + /readyz
+│   ├── main.py            # FastAPI app, lifespan, /weather + /livez + /readyz + UI mount
 │   ├── aggregator.py      # asyncio.gather fan-out + total-budget guard
 │   ├── geocoding.py       # Open-Meteo geocoder + country normalisation
 │   ├── insight.py         # Build human-readable summary from snapshots
 │   ├── models.py          # WeatherQuery, WeatherSnapshot, AggregatedResult, ...
 │   ├── config.py          # Settings (pydantic-settings) — env-var driven
-│   └── providers/
-│       ├── base.py        # WeatherProvider ABC + safe_fetch wrapper
-│       ├── open_meteo.py
-│       ├── wttr.py
-│       ├── opensensemap.py
-│       ├── oceandrivers.py
-│       └── seven_timer.py
-├── tests/                 # 29 tests across providers, insight, geocoding, API
-├── .github/workflows/ci.yml
-├── Dockerfile
+│   ├── providers/
+│   │   ├── base.py        # WeatherProvider ABC + safe_fetch wrapper
+│   │   ├── open_meteo.py
+│   │   ├── wttr.py        # uses wttr.in (?format=j1)
+│   │   ├── opensensemap.py # two-step fetch: minimal list + parallel detail
+│   │   ├── oceandrivers.py # AreaPalma AEMET station; regional (Spanish marine)
+│   │   └── seven_timer.py
+│   └── static/
+│       ├── index.html     # browser UI served at /
+│       ├── style.css
+│       └── app.js
+├── tests/                 # 31 tests across providers, insight, geocoding, API
+├── .github/workflows/
+│   ├── ci.yml             # lint + test (Py 3.9–3.12) + build-image
+│   └── pages.yml          # publish UI to GitHub Pages on push to main
+├── Dockerfile             # python:3.12-slim, non-root, tini, curl healthcheck
+├── docker-compose.yml     # one-command run with pinned DNS resolvers
 ├── pyproject.toml
 ├── requirements.txt
 ├── CODE_REVIEW.md         # Senior-engineer review (the inputs to v0.2)

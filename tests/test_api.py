@@ -46,10 +46,19 @@ def test_weather_endpoint_aggregates_all_providers(client):
             },
         )
     )
-    respx.get(url__startswith="https://goweather.xyz/weather/").mock(
+    respx.get(url__startswith="https://wttr.in/").mock(
         return_value=httpx.Response(
             200,
-            json={"temperature": "+19 °C", "wind": "5 km/h", "description": "Sunny"},
+            json={
+                "current_condition": [
+                    {
+                        "temp_C": "19",
+                        "humidity": "60",
+                        "windspeedKmph": "5",
+                        "weatherDesc": [{"value": "Sunny"}],
+                    }
+                ]
+            },
         )
     )
     respx.get("https://api.opensensemap.org/boxes").mock(return_value=httpx.Response(200, json=[]))
@@ -116,8 +125,20 @@ def test_weather_endpoint_isolates_provider_failure(client):
         )
     )
     respx.get("https://api.open-meteo.com/v1/forecast").mock(return_value=httpx.Response(500))
-    respx.get(url__startswith="https://goweather.xyz/weather/").mock(
-        return_value=httpx.Response(200, json={"temperature": "+15 °C"})
+    respx.get(url__startswith="https://wttr.in/").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "current_condition": [
+                    {
+                        "temp_C": "15",
+                        "humidity": "70",
+                        "windspeedKmph": "8",
+                        "weatherDesc": [{"value": "Cloudy"}],
+                    }
+                ]
+            },
+        )
     )
     respx.get("https://api.opensensemap.org/boxes").mock(return_value=httpx.Response(200, json=[]))
     respx.get("https://api.oceandrivers.com/v1.0/getStations/").mock(
@@ -148,3 +169,26 @@ def test_health(client):
 def test_missing_required_city_param(client):
     resp = client.get("/weather", params={"country": "US"})
     assert resp.status_code == 422
+
+
+def test_root_serves_html_ui(client):
+    """Smoke test: the UI is served at / and references the static assets."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    body = resp.text
+    assert "<title>Weather Aggregator</title>" in body
+    # Relative paths so the same HTML works under FastAPI (/) and on GitHub Pages (/REPO/).
+    assert "static/style.css" in body
+    assert "static/app.js" in body
+
+
+def test_static_assets_are_served(client):
+    """Both CSS and JS load with the right content types."""
+    css = client.get("/static/style.css")
+    assert css.status_code == 200
+    assert "css" in css.headers["content-type"]
+
+    js = client.get("/static/app.js")
+    assert js.status_code == 200
+    assert "javascript" in js.headers["content-type"]

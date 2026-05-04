@@ -1,4 +1,3 @@
-import re
 from typing import Any, Optional
 from urllib.parse import quote
 
@@ -8,11 +7,17 @@ from app.config import settings
 from app.models import TransformedInputs, WeatherQuery, WeatherSnapshot
 from app.providers.base import WeatherProvider
 
-_NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
-
 
 class WttrProvider(WeatherProvider):
-    """robertoduessmann/weather-api — hosted at goweather.xyz, takes a city name."""
+    """wttr.in (chubin/wttr.in) JSON API.
+
+    The originally-listed robertoduessmann/weather-api at goweather.xyz is
+    offline (404 for every path as of 2026-05; underlying Heroku app gone).
+    wttr.in is the well-known alternative — accepts city names as the path
+    and returns rich JSON via `?format=j1`:
+
+        GET https://wttr.in/Berlin?format=j1
+    """
 
     name = "wttr"
 
@@ -23,17 +28,27 @@ class WttrProvider(WeatherProvider):
         transformed: TransformedInputs,
     ):
         url = f"{settings.wttr_url}/{quote(query.city, safe='')}"
-        resp = await client.get(url, timeout=settings.request_timeout_seconds)
+        resp = await client.get(
+            url,
+            params={"format": "j1"},
+            timeout=settings.request_timeout_seconds,
+        )
         resp.raise_for_status()
         return resp.json()
 
     def normalize(self, raw: Any, transformed: TransformedInputs) -> WeatherSnapshot:
         raw = raw or {}
-        # goweather.xyz always reports Celsius and km/h (no unit options).
+        cur = (raw.get("current_condition") or [{}])[0] or {}
+        weather_desc = ((cur.get("weatherDesc") or [{}])[0] or {}).get("value")
+
         return WeatherSnapshot(
-            temperature_c=_extract_number(raw.get("temperature")),
-            wind_kph=_extract_number(raw.get("wind")),
-            conditions=raw.get("description") or None,
+            temperature_c=_as_float(cur.get("temp_C")),
+            feels_like_c=_as_float(cur.get("FeelsLikeC")),
+            humidity_pct=_as_float(cur.get("humidity")),
+            wind_kph=_as_float(cur.get("windspeedKmph")),
+            cloud_cover_pct=_as_float(cur.get("cloudcover")),
+            precipitation_mm=_as_float(cur.get("precipMM")),
+            conditions=weather_desc,
             is_forecast=False,
             forecast_for_date=transformed.date,
             source_quality="live",
@@ -43,16 +58,19 @@ class WttrProvider(WeatherProvider):
         return WeatherSnapshot(
             temperature_c=14.0,
             wind_kph=8.0,
+            humidity_pct=60.0,
             conditions="Sunny (example)",
             is_forecast=False,
             forecast_for_date=transformed.date,
             source_quality="fallback",
-            notes="goweather.xyz unavailable; placeholder example data.",
+            notes="wttr.in unavailable; placeholder example data.",
         )
 
 
-def _extract_number(s: Any) -> Optional[float]:
-    if not isinstance(s, str):
+def _as_float(v: Any) -> Optional[float]:
+    if v is None:
         return None
-    m = _NUM_RE.search(s)
-    return float(m.group()) if m else None
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
