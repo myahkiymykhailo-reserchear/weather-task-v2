@@ -131,7 +131,7 @@ async def test_opensensemap_two_step_fetch_aggregates_sensor_values(query, trans
                 "exposure": "outdoor",
                 "sensors": [
                     {"title": "Temperature", "unit": "°C", "lastMeasurement": {"value": "20.0"}},
-                    {"title": "Humidity",    "unit": "%",  "lastMeasurement": {"value": "60"}},
+                    {"title": "Humidity", "unit": "%", "lastMeasurement": {"value": "60"}},
                 ],
             },
         )
@@ -144,7 +144,7 @@ async def test_opensensemap_two_step_fetch_aggregates_sensor_values(query, trans
                 "name": "Box-B",
                 "exposure": "outdoor",
                 "sensors": [
-                    {"title": "Temperatur",  "unit": "°C", "lastMeasurement": {"value": "22.0"}},
+                    {"title": "Temperatur", "unit": "°C", "lastMeasurement": {"value": "22.0"}},
                 ],
             },
         )
@@ -162,9 +162,7 @@ async def test_opensensemap_two_step_fetch_aggregates_sensor_values(query, trans
 @pytest.mark.asyncio
 @respx.mock
 async def test_opensensemap_handles_no_nearby_boxes(query, transformed):
-    respx.get("https://api.opensensemap.org/boxes").mock(
-        return_value=httpx.Response(200, json=[])
-    )
+    respx.get("https://api.opensensemap.org/boxes").mock(return_value=httpx.Response(200, json=[]))
     async with httpx.AsyncClient() as client:
         result = await OpenSenseMapProvider().safe_fetch(client, query, transformed)
     assert result.status == "ok"
@@ -202,9 +200,9 @@ def test_haversine_known_distance():
 async def test_oceandrivers_returns_out_of_region_for_far_query(query, transformed):
     """transformed fixture is New York; OceanDrivers' single station is in Mallorca,
     well over the 200 km coverage radius — provider should not call upstream."""
-    route = respx.get(
-        "https://api.oceandrivers.com/v1.0/getAemetStation/AreaPalma/lastdata/"
-    ).mock(return_value=httpx.Response(200, json={"TEMPERATURE": 20.0}))
+    route = respx.get("https://api.oceandrivers.com/v1.0/getAemetStation/AreaPalma/lastdata/").mock(
+        return_value=httpx.Response(200, json={"TEMPERATURE": 20.0})
+    )
     async with httpx.AsyncClient() as client:
         result = await OceanDriversProvider().safe_fetch(client, query, transformed)
     assert result.status == "ok"
@@ -223,21 +221,23 @@ async def test_oceandrivers_fetches_data_when_query_within_region():
     from app.models import TransformedInputs, WeatherQuery
 
     near_palma = TransformedInputs(
-        lat=39.6, lon=2.65, timezone="Europe/Madrid",
-        resolved_name="Palma, ES", country_code="ES",
-        date=date(2026, 5, 4), units="celsius",
+        lat=39.6,
+        lon=2.65,
+        timezone="Europe/Madrid",
+        resolved_name="Palma, ES",
+        country_code="ES",
+        date=date(2026, 5, 4),
+        units="celsius",
     )
     q = WeatherQuery(city="Palma", country="ES", units="celsius")
 
-    respx.get(
-        "https://api.oceandrivers.com/v1.0/getAemetStation/AreaPalma/lastdata/"
-    ).mock(
+    respx.get("https://api.oceandrivers.com/v1.0/getAemetStation/AreaPalma/lastdata/").mock(
         return_value=httpx.Response(
             200,
             json={
                 "TEMPERATURE": 20.2,
                 "HUMIDITY": 83.0,
-                "TWS": 6.667,           # m/s ≈ 24 km/h
+                "TWS": 6.667,  # m/s ≈ 24 km/h
                 "TWD": 225,
                 "RAIN_DAY": 0.0,
             },
