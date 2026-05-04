@@ -113,31 +113,63 @@ async def test_provider_records_error_on_5xx(query, transformed):
 
 @pytest.mark.asyncio
 @respx.mock
-async def test_opensensemap_slims_response(query, transformed):
-    body = [
-        {
-            "name": "Sense-Box-1",
-            "exposure": "outdoor",
-            "currentLocation": {"coordinates": [-74.0, 40.71]},
-            "sensors": [
-                {
-                    "title": "Temperature",
-                    "unit": "°C",
-                    "lastMeasurement": {"value": "20.1"},
-                }
-            ],
-        },
-        {"name": "Sense-Box-2", "exposure": "indoor", "sensors": []},
+async def test_opensensemap_two_step_fetch_aggregates_sensor_values(query, transformed):
+    """Provider does GET /boxes?...&minimal=true then parallel GET /boxes/{id}."""
+    minimal_list = [
+        {"_id": "box-a", "name": "Box-A"},
+        {"_id": "box-b", "name": "Box-B"},
     ]
     respx.get("https://api.opensensemap.org/boxes").mock(
-        return_value=httpx.Response(200, json=body)
+        return_value=httpx.Response(200, json=minimal_list)
+    )
+    respx.get("https://api.opensensemap.org/boxes/box-a").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "_id": "box-a",
+                "name": "Box-A",
+                "exposure": "outdoor",
+                "sensors": [
+                    {"title": "Temperature", "unit": "°C", "lastMeasurement": {"value": "20.0"}},
+                    {"title": "Humidity",    "unit": "%",  "lastMeasurement": {"value": "60"}},
+                ],
+            },
+        )
+    )
+    respx.get("https://api.opensensemap.org/boxes/box-b").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "_id": "box-b",
+                "name": "Box-B",
+                "exposure": "outdoor",
+                "sensors": [
+                    {"title": "Temperatur",  "unit": "°C", "lastMeasurement": {"value": "22.0"}},
+                ],
+            },
+        )
     )
     async with httpx.AsyncClient() as client:
         result = await OpenSenseMapProvider().safe_fetch(client, query, transformed)
     assert result.status == "ok"
     assert result.data["nearby_box_count"] == 2
     assert len(result.data["boxes"]) == 2
-    assert result.data["boxes"][0]["name"] == "Sense-Box-1"
+    # Normalised: average temperature across both boxes (20 + 22) / 2 = 21
+    assert result.normalized.temperature_c == 21.0
+    assert result.normalized.humidity_pct == 60.0
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_opensensemap_handles_no_nearby_boxes(query, transformed):
+    respx.get("https://api.opensensemap.org/boxes").mock(
+        return_value=httpx.Response(200, json=[])
+    )
+    async with httpx.AsyncClient() as client:
+        result = await OpenSenseMapProvider().safe_fetch(client, query, transformed)
+    assert result.status == "ok"
+    assert result.data["nearby_box_count"] == 0
+    assert result.normalized.notes and "No openSenseMap boxes" in result.normalized.notes
 
 
 @pytest.mark.asyncio
