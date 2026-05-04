@@ -1,17 +1,22 @@
 import logging
 from contextlib import asynccontextmanager
 from datetime import date as date_type
+from pathlib import Path
 from typing import Optional
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from app.aggregator import aggregate_weather
 from app.config import settings
 from app.geocoding import GeocodingError
 from app.models import Units, WeatherQuery, WeatherResponse
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
 def _configure_logging() -> None:
@@ -51,6 +56,16 @@ if _cors_origins:
         allow_methods=["GET"],
         allow_headers=["*"],
     )
+
+
+# Static UI: served at "/" and "/static/*". Path is resolved relative to this file
+# so the app finds its assets regardless of cwd.
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", include_in_schema=False)
+async def root():
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 def get_http_client(request: Request) -> httpx.AsyncClient:

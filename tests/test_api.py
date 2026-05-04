@@ -148,3 +148,25 @@ def test_health(client):
 def test_missing_required_city_param(client):
     resp = client.get("/weather", params={"country": "US"})
     assert resp.status_code == 422
+
+
+def test_root_serves_html_ui(client):
+    """Smoke test: the UI is served at / and references the static assets."""
+    resp = client.get("/")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"].startswith("text/html")
+    body = resp.text
+    assert "<title>Weather Aggregator</title>" in body
+    assert '/static/style.css' in body
+    assert '/static/app.js' in body
+
+
+def test_static_assets_are_served(client):
+    """Both CSS and JS load with the right content types."""
+    css = client.get("/static/style.css")
+    assert css.status_code == 200
+    assert "css" in css.headers["content-type"]
+
+    js = client.get("/static/app.js")
+    assert js.status_code == 200
+    assert "javascript" in js.headers["content-type"]
