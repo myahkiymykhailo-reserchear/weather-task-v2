@@ -28,6 +28,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Provisions the Pages site via the API if not already enabled.
+      # Without this, deploy-pages@v4 returns HTTP 404 ("Not Found") on
+      # the very first run even when the repo's Pages source is set to
+      # "GitHub Actions" in the UI — the chicken-and-egg fix.
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
       - name: Stage Pages site
         run: |
           set -euo pipefail
@@ -48,5 +57,6 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - id: deployment
+      - name: Deploy to GitHub Pages
+        id: deployment
         uses: actions/deploy-pages@v4
