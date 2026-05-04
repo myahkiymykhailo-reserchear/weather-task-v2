@@ -1,5 +1,5 @@
 from datetime import date as date_type
-from typing import Any
+from typing import Any, Optional, Tuple
 
 import httpx
 
@@ -9,6 +9,35 @@ from app.models import TransformedInputs, WeatherQuery
 
 class GeocodingError(Exception):
     pass
+
+
+COUNTRY_ALIASES: dict[str, str] = {
+    "usa": "us",
+    "u.s.": "us",
+    "u.s.a.": "us",
+    "united states": "us",
+    "united states of america": "us",
+    "uk": "gb",
+    "u.k.": "gb",
+    "great britain": "gb",
+    "britain": "gb",
+    "united kingdom": "gb",
+    "deutschland": "de",
+    "germany": "de",
+    "espana": "es",
+    "españa": "es",
+    "spain": "es",
+}
+
+
+def normalize_country(country: str) -> Tuple[str, Optional[str]]:
+    """Return (raw_lower, iso2_or_None). ISO-2 lookup is best-effort."""
+    raw = (country or "").strip().lower()
+    if not raw:
+        return raw, None
+    if len(raw) == 2 and raw.isalpha():
+        return raw, raw
+    return raw, COUNTRY_ALIASES.get(raw)
 
 
 async def geocode(client: httpx.AsyncClient, query: WeatherQuery) -> TransformedInputs:
@@ -30,7 +59,15 @@ async def geocode(client: httpx.AsyncClient, query: WeatherQuery) -> Transformed
     if not results:
         raise GeocodingError(f"No geocoding results for city='{query.city}'")
 
-    chosen = _pick_best(results, query)
+    chosen, score = _pick_best(results, query)
+
+    if query.country and score == 0:
+        raise GeocodingError(
+            f"No geocoding result for city='{query.city}' matched country="
+            f"'{query.country}'. Top candidate was "
+            f"'{chosen.get('name')}, {chosen.get('country')}'. "
+            "Try the ISO-3166 alpha-2 code (e.g. 'US', 'DE')."
+        )
 
     name_parts = [chosen.get("name"), chosen.get("admin1"), chosen.get("country")]
     resolved_name = ", ".join(p for p in name_parts if p)
@@ -46,22 +83,22 @@ async def geocode(client: httpx.AsyncClient, query: WeatherQuery) -> Transformed
     )
 
 
-def _pick_best(results: list[dict[str, Any]], query: WeatherQuery) -> dict[str, Any]:
-    country = (query.country or "").strip().lower()
+def _pick_best(results: list, query: WeatherQuery) -> Tuple[dict, int]:
+    country_raw, country_iso = normalize_country(query.country or "")
     state = (query.state or "").strip().lower()
 
     def score(r: dict[str, Any]) -> int:
         s = 0
-        if country:
+        if country_raw:
             cc = (r.get("country_code") or "").lower()
             cn = (r.get("country") or "").lower()
-            if cc == country:
+            if country_iso and cc == country_iso:
                 s += 10
-            elif cn == country:
+            elif cn == country_raw or cc == country_raw:
                 s += 9
-        if state:
-            if (r.get("admin1") or "").lower() == state:
-                s += 5
+        if state and (r.get("admin1") or "").lower() == state:
+            s += 5
         return s
 
-    return max(results, key=score)
+    best = max(results, key=score)
+    return best, score(best)

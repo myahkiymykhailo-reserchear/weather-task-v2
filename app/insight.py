@@ -1,68 +1,77 @@
-import re
-from typing import Any, Optional
+from collections import Counter
 
-from app.models import TransformedInputs
+from app.models import ProviderResult, TransformedInputs, WeatherSnapshot
 
 
-def build_insight(transformed: TransformedInputs, results: dict[str, Any]) -> str:
-    """Produce a short human-friendly summary across providers that returned data."""
-    samples: list[tuple[str, float]] = []
+def build_insight(transformed: TransformedInputs, providers: dict[str, ProviderResult]) -> str:
+    """Produce a short human-friendly summary across providers.
 
-    om = results.get("open_meteo") or {}
-    if om.get("status") == "ok":
-        cur = (om.get("data") or {}).get("current") or {}
-        t = cur.get("temperature_2m")
-        if isinstance(t, (int, float)):
-            samples.append(("open_meteo", float(t)))
+    Reads each provider's normalised ``WeatherSnapshot`` (always Celsius)
+    so the average is unit-safe regardless of which APIs respect the
+    user's requested unit. Display-time conversion to Fahrenheit (if
+    requested) happens once at the end.
 
-    wttr = results.get("wttr") or {}
-    if wttr.get("status") == "ok":
-        t = (wttr.get("data") or {}).get("temperature")
-        n = _extract_temp_number(t) if isinstance(t, str) else None
-        if n is not None:
-            samples.append(("wttr", n))
-
-    seven = results.get("seven_timer") or {}
-    if seven.get("status") == "ok":
-        series = (seven.get("data") or {}).get("dataseries") or []
-        if series and isinstance(series[0].get("temp2m"), (int, float)):
-            samples.append(("seven_timer", float(series[0]["temp2m"])))
-
-    unit_label = "°C" if transformed.units == "celsius" else "°F"
+    Snapshots flagged as ``source_quality="fallback"`` (i.e. the upstream
+    failed and the provider returned example data) are still shown but
+    a count is appended so the user knows how much of the answer was
+    placeholder data.
+    """
+    snapshots: dict[str, WeatherSnapshot] = {
+        name: pr.normalized for name, pr in providers.items() if pr.normalized
+    }
     location = transformed.resolved_name or f"({transformed.lat:.2f}, {transformed.lon:.2f})"
 
-    if not samples:
-        return f"No temperature samples available for {location} on {transformed.date}."
+    if not snapshots:
+        return f"No weather snapshots available for {location} on {transformed.date}."
 
-    avg = sum(t for _, t in samples) / len(samples)
-    sources = ", ".join(s for s, _ in samples)
-    pieces = [
-        f"{location} on {transformed.date}: average ~{avg:.1f}{unit_label} "
-        f"across {len(samples)} source(s) ({sources})."
+    temps_c: list[tuple[str, float]] = [
+        (name, snap.temperature_c)
+        for name, snap in snapshots.items()
+        if snap.temperature_c is not None
     ]
-    daily_extra = _describe_open_meteo_daily(om, unit_label)
-    if daily_extra:
-        pieces.append(daily_extra)
-    return " ".join(pieces)
+    fallback_sources = [
+        name for name, snap in snapshots.items() if snap.source_quality == "fallback"
+    ]
 
+    parts: list[str] = []
 
-def _extract_temp_number(s: Optional[str]) -> Optional[float]:
-    if not s:
-        return None
-    m = re.search(r"-?\d+(?:\.\d+)?", s)
-    return float(m.group()) if m else None
+    if temps_c:
+        avg_c = sum(t for _, t in temps_c) / len(temps_c)
+        if transformed.units == "fahrenheit":
+            avg_display = avg_c * 9 / 5 + 32
+            unit = "°F"
+        else:
+            avg_display = avg_c
+            unit = "°C"
+        sources = ", ".join(name for name, _ in temps_c)
+        parts.append(
+            f"{location} on {transformed.date}: average ~{avg_display:.1f}{unit} "
+            f"across {len(temps_c)} source(s) ({sources})."
+        )
+    else:
+        parts.append(f"{location} on {transformed.date}: no temperature samples.")
 
+    conditions = [snap.conditions for snap in snapshots.values() if snap.conditions]
+    if conditions:
+        most_common, _ = Counter(conditions).most_common(1)[0]
+        parts.append(f"Conditions: {most_common}.")
 
-def _describe_open_meteo_daily(om: dict, unit_label: str) -> str:
-    if om.get("status") != "ok":
-        return ""
-    daily = (om.get("data") or {}).get("daily") or {}
-    tmax = (daily.get("temperature_2m_max") or [None])[0]
-    tmin = (daily.get("temperature_2m_min") or [None])[0]
-    precip = (daily.get("precipitation_sum") or [None])[0]
-    parts = []
-    if tmin is not None and tmax is not None:
-        parts.append(f"high {tmax}{unit_label} / low {tmin}{unit_label}")
-    if precip is not None:
-        parts.append(f"precipitation {precip} mm")
-    return ("Open-Meteo daily: " + ", ".join(parts) + ".") if parts else ""
+    precip_values = [
+        snap.precipitation_mm for snap in snapshots.values() if snap.precipitation_mm is not None
+    ]
+    if precip_values:
+        avg_precip = sum(precip_values) / len(precip_values)
+        parts.append(f"Precipitation: ~{avg_precip:.1f}mm.")
+
+    wind_values = [snap.wind_kph for snap in snapshots.values() if snap.wind_kph is not None]
+    if wind_values:
+        avg_wind = sum(wind_values) / len(wind_values)
+        parts.append(f"Wind: ~{avg_wind:.0f} km/h.")
+
+    if fallback_sources:
+        parts.append(
+            f"Note: {len(fallback_sources)} of {len(snapshots)} source(s) returned "
+            f"fallback example data ({', '.join(fallback_sources)})."
+        )
+
+    return " ".join(parts)

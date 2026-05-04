@@ -8,6 +8,7 @@ dependencies = [
     "uvicorn[standard]>=0.29",
     "httpx>=0.27",
     "pydantic>=2.6",
+    "pydantic-settings>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -15,7 +16,35 @@ dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
     "respx>=0.21",
+    "ruff>=0.4",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+# UP045/UP007 would push PEP 604 unions (`X | None`); pydantic v2 evaluates
+# annotations at class-definition time, which fails on Python 3.9. We keep
+# Optional[...] so the codebase stays runnable on the lowest supported version.
+ignore = [
+    "E501",
+    # PEP 604 unions / typing.Optional → `X | None` etc. — keep Optional[X]
+    # so the codebase stays runnable on Python 3.9 (pydantic evaluates
+    # annotations at class-definition time, where 3.9 chokes on `X | None`).
+    "UP045",
+    "UP007",
+    "UP006",
+    "UP035",
+    # B905 (zip strict=) is 3.10+ only.
+    "B905",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B", "SIM"]
+# FastAPI uses `Query(...)` and `Depends(...)` in argument defaults by design.
+"app/main.py" = ["B008"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"

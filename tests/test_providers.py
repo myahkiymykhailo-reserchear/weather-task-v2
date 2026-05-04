@@ -39,7 +39,7 @@ async def test_open_meteo_fetch_passes_units_and_date(query, transformed):
 @pytest.mark.asyncio
 @respx.mock
 async def test_wttr_uses_city_in_path(query, transformed):
-    respx.get("https://goweather.xyz/weather/New York").mock(
+    respx.get("https://goweather.xyz/weather/New%20York").mock(
         return_value=httpx.Response(200, json={"temperature": "+18 °C", "wind": "10 km/h"})
     )
     async with httpx.AsyncClient() as client:
@@ -50,8 +50,40 @@ async def test_wttr_uses_city_in_path(query, transformed):
 
 @pytest.mark.asyncio
 @respx.mock
+async def test_wttr_url_encodes_city_with_spaces_and_diacritics(transformed):
+    from app.models import WeatherQuery
+
+    sao_paulo = WeatherQuery(city="São Paulo", country="BR", units="celsius")
+    route = respx.get("https://goweather.xyz/weather/S%C3%A3o%20Paulo").mock(
+        return_value=httpx.Response(200, json={"temperature": "+22 °C"})
+    )
+    async with httpx.AsyncClient() as client:
+        result = await WttrProvider().safe_fetch(client, sao_paulo, transformed)
+    assert result.status == "ok"
+    assert route.called
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_provider_returns_fallback_on_read_timeout(query, transformed):
+    """P4.2: an httpx.ReadTimeout from upstream is converted to a
+    fallback ProviderResult so the rest of the response is unaffected."""
+    respx.get("https://goweather.xyz/weather/New%20York").mock(
+        side_effect=httpx.ReadTimeout("upstream took too long")
+    )
+    async with httpx.AsyncClient() as client:
+        result = await WttrProvider().safe_fetch(client, query, transformed)
+    assert result.status == "error"
+    assert "ReadTimeout" in result.error
+    assert result.normalized is not None
+    assert result.normalized.source_quality == "fallback"
+    assert result.normalized.notes and "unavailable" in result.normalized.notes
+
+
+@pytest.mark.asyncio
+@respx.mock
 async def test_provider_records_error_on_5xx(query, transformed):
-    respx.get("https://goweather.xyz/weather/New York").mock(return_value=httpx.Response(500))
+    respx.get("https://goweather.xyz/weather/New%20York").mock(return_value=httpx.Response(500))
     async with httpx.AsyncClient() as client:
         result = await WttrProvider().safe_fetch(client, query, transformed)
     assert result.status == "error"
@@ -126,6 +158,40 @@ async def test_oceandrivers_returns_message_when_no_nearby_station(query, transf
     assert result.status == "ok"
     assert "No station within" in result.data["message"]
     assert result.data["stations_checked"] == 1
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_oceandrivers_handles_zero_coordinate_station():
+    """Regression: 0.0 latitude/longitude must not be treated as missing."""
+    from datetime import date
+
+    from app.models import TransformedInputs, WeatherQuery
+
+    near_equator = TransformedInputs(
+        lat=0.5,
+        lon=0.5,
+        timezone="UTC",
+        resolved_name="Test",
+        country_code="XX",
+        date=date(2026, 5, 4),
+        units="celsius",
+    )
+    q = WeatherQuery(city="Test", country="XX", units="celsius")
+
+    respx.get("https://api.oceandrivers.com/v1.0/getStations/").mock(
+        return_value=httpx.Response(
+            200,
+            json=[{"stationName": "EquatorStation", "latitude": 0.0, "longitude": 0.0}],
+        )
+    )
+    respx.get("https://api.oceandrivers.com/v1.0/getMeteo/EquatorStation/en/json").mock(
+        return_value=httpx.Response(200, json={"temperatureC": 28.0})
+    )
+    async with httpx.AsyncClient() as client:
+        result = await OceanDriversProvider().safe_fetch(client, q, near_equator)
+    assert result.status == "ok"
+    assert result.data["station"] == "EquatorStation"
 
 
 @pytest.mark.asyncio
